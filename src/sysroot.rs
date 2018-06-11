@@ -76,6 +76,7 @@ fn build_crate(
 
     let mut cmd = Command::new("cargo");
     cmd.env_remove("CARGO_TARGET_DIR");
+    cmd.env_remove("RUSTFLAGS");
     cmd.env("__CARGO_DEFAULT_LIB_METADATA", "XARGO");
 
     // As of rust-lang/cargo#4788 Cargo invokes rustc with a changed "current directory" so
