@@ -65,7 +65,7 @@ impl Home {
         let fs = self.path(triple);
 
         fs.open_rw(".sentinel", &format!("{}'s sysroot", triple))
-            .chain_err(|| format!("couldn't lock {}'s sysroot as read-only", triple))
+            .chain_err(|| format!("couldn't lock {}'s sysroot as read-write", triple))
     }
 }
 
