@@ -101,12 +101,23 @@ pub fn write(path: &Path, contents: &str) -> Result<()> {
         .chain_err(|| format!("couldn't write to {}", p))
 }
 
+/// Escapes spaces (` `) in the given input with `%20` or does nothing. Then
+/// it returns the processed string.
+/// ### Windows Only
+/// Doesn't do anything on non-windows systems because escaped output
+/// (containing `\ `) is still treated as two arguments because of the
+/// remaining space character.
 pub fn escape_argument_spaces<S: Into<String>>(arg: S) -> String {
     #[cfg(target_os = "windows")]
     let escaped = arg.into().replace(" ", "%20");
 
     #[cfg(not(target_os = "windows"))]
+    let escaped = arg.into();
+    // Doesn't work because there's still a space character in the string
+    // and it's still interpreted as a separation between two arguments.
+    /*
     let escaped = arg.into().replace(" ", "\\ ");
+    */
 
     escaped
 }
