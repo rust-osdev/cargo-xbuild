@@ -23,7 +23,7 @@ pub fn run(
     verbose: bool,
 ) -> Result<ExitStatus> {
     let mut cmd = Command::new("cargo");
-    cmd.arg("build");
+    cmd.arg("rustc");
     cmd.args(args.all());
 
     let flags = rustflags.for_xargo(home);
