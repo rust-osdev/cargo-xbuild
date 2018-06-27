@@ -10,12 +10,6 @@ name = "cargo-xbuild"
 repository = "https://github.com/rust-osdev/cargo-xbuild"
 version = "0.4.7"
 
-[[bin]]
-name = "cargo-xbuild"
-
-[[bin]]
-name = "cargo-xrustc"
-
 [lib]
 name = "xargo_lib"
 

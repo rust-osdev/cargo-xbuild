@@ -23,32 +23,16 @@ use rustc_version::Channel;
 use errors::*;
 use rustc::Target;
 
-pub mod cargo;
-pub mod cli;
-pub mod config;
-pub mod errors;
-pub mod extensions;
-pub mod flock;
-pub mod rustc;
-pub mod sysroot;
-pub mod util;
-pub mod xargo;
-
-pub struct CurrentDirectory {
-    path: PathBuf,
-}
-
-impl CurrentDirectory {
-    pub fn get() -> Result<CurrentDirectory> {
-        env::current_dir()
-            .chain_err(|| "couldn't get the current directory")
-            .map(|cd| CurrentDirectory { path: cd })
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-}
+mod cargo;
+mod cli;
+mod config;
+mod errors;
+mod extensions;
+mod flock;
+mod rustc;
+mod sysroot;
+mod util;
+mod xargo;
 
 // We use a different sysroot for Native compilation to avoid file locking
 //
@@ -62,7 +46,7 @@ pub enum CompilationMode {
 }
 
 impl CompilationMode {
-    pub fn hash<H>(&self, hasher: &mut H) -> Result<()>
+    fn hash<H>(&self, hasher: &mut H) -> Result<()>
     where
         H: Hasher,
     {
@@ -75,7 +59,7 @@ impl CompilationMode {
     }
 
     /// Returns the condensed target triple (removes any `.json` extension and path components).
-    pub fn triple(&self) -> &str {
+    fn triple(&self) -> &str {
         match *self {
             CompilationMode::Cross(ref target) => target.triple(),
             CompilationMode::Native(ref triple) => triple,
@@ -83,17 +67,128 @@ impl CompilationMode {
     }
 
     /// Returns the original target triple passed to xargo (perhaps with `.json` extension).
-    pub fn orig_triple(&self) -> &str {
+    fn orig_triple(&self) -> &str {
         match *self {
             CompilationMode::Cross(ref target) => target.orig_triple(),
             CompilationMode::Native(ref triple) => triple,
         }
     }
 
-    pub fn is_native(&self) -> bool {
+    fn is_native(&self) -> bool {
         match *self {
             CompilationMode::Native(_) => true,
             _ => false,
         }
+    }
+}
+
+pub fn run(command_name: &str, help: &str, use_rustc: bool) -> Result<Option<ExitStatus>> {
+    use cli::Command;
+
+    let (command, args) = cli::args(command_name)?;
+    match command {
+        Command::Build => Ok(Some(build(args, use_rustc)?)),
+        Command::Help => {
+            print!("{}", help);
+            Ok(None)
+        }
+        Command::Version => {
+            writeln!(
+                io::stdout(),
+                concat!("cargo-xbuild ", env!("CARGO_PKG_VERSION"), "{}"),
+                include_str!(concat!(env!("OUT_DIR"), "/commit-info.txt"))
+            ).unwrap();
+            Ok(None)
+        }
+    }
+}
+
+fn build(args: cli::Args, use_rustc: bool) -> Result<(ExitStatus)> {
+    let verbose = args.verbose();
+    let meta = rustc::version();
+    let cd = CurrentDirectory::get()?;
+    let config = cargo::config()?;
+
+    let metadata =
+        cargo_metadata::metadata(args.manifest_path()).expect("cargo metadata invocation failed");
+    let root = Path::new(&metadata.workspace_root);
+    let crate_config = config::Config::from_metadata(&metadata)
+        .map_err(|_| "parsing package.metadata.cargo-xbuild section failed")?;
+
+    // We can't build sysroot with stable or beta due to unstable features
+    let sysroot = rustc::sysroot(verbose)?;
+    let src = match meta.channel {
+        Channel::Dev => rustc::Src::from_env().ok_or(
+            "The XARGO_RUST_SRC env variable must be set and point to the \
+             Rust source directory when working with the 'dev' channel",
+        )?,
+        Channel::Nightly => if let Some(src) = rustc::Src::from_env() {
+            src
+        } else {
+            sysroot.src()?
+        },
+        Channel::Stable | Channel::Beta => {
+            writeln!(
+                io::stderr(),
+                "WARNING: the sysroot can't be built for the {:?} channel. \
+                 Switch to nightly.",
+                meta.channel
+            ).ok();
+            return cargo::run(&args, verbose);
+        }
+    };
+
+    let cmode = if let Some(triple) = args.target() {
+        if triple == meta.host {
+            Some(CompilationMode::Native(meta.host.clone()))
+        } else {
+            Target::new(triple, &cd, verbose)?.map(CompilationMode::Cross)
+        }
+    } else {
+        if let Some(ref config) = config {
+            if let Some(triple) = config.target()? {
+                Target::new(triple, &cd, verbose)?.map(CompilationMode::Cross)
+            } else {
+                Some(CompilationMode::Native(meta.host.clone()))
+            }
+        } else {
+            Some(CompilationMode::Native(meta.host.clone()))
+        }
+    };
+
+    if let Some(cmode) = cmode {
+        let home = xargo::home(root, &crate_config)?;
+        let rustflags = cargo::rustflags(config.as_ref(), cmode.triple())?;
+
+        sysroot::update(
+            &cmode,
+            &home,
+            &root,
+            &crate_config,
+            &rustflags,
+            &meta,
+            &src,
+            &sysroot,
+            verbose,
+        )?;
+        return xargo::run(&args, &cmode, rustflags, &home, &meta, use_rustc, verbose);
+    }
+
+    cargo::run(&args, verbose)
+}
+
+pub struct CurrentDirectory {
+    path: PathBuf,
+}
+
+impl CurrentDirectory {
+    fn get() -> Result<CurrentDirectory> {
+        env::current_dir()
+            .chain_err(|| "couldn't get the current directory")
+            .map(|cd| CurrentDirectory { path: cd })
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
     }
 }
