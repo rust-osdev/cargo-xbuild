@@ -11,6 +11,7 @@ extern crate serde_derive;
 extern crate tempdir;
 extern crate toml;
 extern crate walkdir;
+extern crate xargo_lib;
 
 use std::hash::{Hash, Hasher};
 use std::io::Write;
@@ -20,69 +21,26 @@ use std::{env, io, process};
 
 use rustc_version::Channel;
 
-use errors::*;
-use rustc::Target;
+use xargo_lib::errors::*;
+use xargo_lib::rustc::Target;
 
-mod cargo;
-mod cli;
-mod config;
-mod errors;
-mod extensions;
-mod flock;
-mod rustc;
-mod sysroot;
-mod util;
-mod xargo;
+use xargo_lib::cargo;
+use xargo_lib::cli;
+use xargo_lib::config;
+use xargo_lib::errors;
+use xargo_lib::extensions;
+use xargo_lib::flock;
+use xargo_lib::rustc;
+use xargo_lib::sysroot;
+use xargo_lib::util;
+use xargo_lib::xargo;
+
+use xargo_lib::CurrentDirectory;
+use xargo_lib::CompilationMode;
 
 const HELP: &str = include_str!("help.txt");
 
-// We use a different sysroot for Native compilation to avoid file locking
-//
-// Cross compilation requires `lib/rustlib/$HOST` to match `rustc`'s sysroot,
-// whereas Native compilation wants to use a custom `lib/rustlib/$HOST`. If each
-// mode has its own sysroot then we avoid sharing that directory and thus file
-// locking it.
-pub enum CompilationMode {
-    Cross(Target),
-    Native(String),
-}
 
-impl CompilationMode {
-    fn hash<H>(&self, hasher: &mut H) -> Result<()>
-    where
-        H: Hasher,
-    {
-        match *self {
-            CompilationMode::Cross(ref target) => target.hash(hasher)?,
-            CompilationMode::Native(ref triple) => triple.hash(hasher),
-        }
-
-        Ok(())
-    }
-
-    /// Returns the condensed target triple (removes any `.json` extension and path components).
-    fn triple(&self) -> &str {
-        match *self {
-            CompilationMode::Cross(ref target) => target.triple(),
-            CompilationMode::Native(ref triple) => triple,
-        }
-    }
-
-    /// Returns the original target triple passed to xargo (perhaps with `.json` extension).
-    fn orig_triple(&self) -> &str {
-        match *self {
-            CompilationMode::Cross(ref target) => target.orig_triple(),
-            CompilationMode::Native(ref triple) => triple,
-        }
-    }
-
-    fn is_native(&self) -> bool {
-        match *self {
-            CompilationMode::Native(_) => true,
-            _ => false,
-        }
-    }
-}
 
 pub fn main() {
     fn show_backtrace() -> bool {
@@ -120,7 +78,7 @@ pub fn main() {
 fn run() -> Result<Option<ExitStatus>> {
     use cli::Command;
 
-    let (command, args) = cli::args()?;
+    let (command, args) = cli::args("xrustc")?;
     match command {
         Command::Build => Ok(Some(build(args)?)),
         Command::Help => {
@@ -206,24 +164,8 @@ fn build(args: cli::Args) -> Result<(ExitStatus)> {
             &sysroot,
             verbose,
         )?;
-        return xargo::run(&args, &cmode, rustflags, &home, &meta, verbose);
+        return xargo::run(&args, &cmode, rustflags, &home, &meta, true, verbose);
     }
 
     cargo::run(&args, verbose)
-}
-
-pub struct CurrentDirectory {
-    path: PathBuf,
-}
-
-impl CurrentDirectory {
-    fn get() -> Result<CurrentDirectory> {
-        env::current_dir()
-            .chain_err(|| "couldn't get the current directory")
-            .map(|cd| CurrentDirectory { path: cd })
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
 }
