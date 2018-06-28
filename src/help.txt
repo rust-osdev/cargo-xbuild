@@ -1,14 +1,14 @@
-Wrapper for `cargo build` that cross-compiles core, compiler_builtins and alloc
+Wrapper for `cargo {command_name}` that cross-compiles core, compiler_builtins and alloc
 
 USAGE:
-    cargo xbuild [OPTIONS]
+    cargo x{command_name} [OPTIONS]
 
 OPTIONS:
     -h, --help      Prints help information and exit
     ---version      Prints version information and exit
 
-    Any additional options are directly passed to `cargo build` (see
-    `cargo build --help` for possible options).
+    Any additional options are directly passed to `cargo {command_name}` (see
+    `cargo {command_name} --help` for possible options).
 
 CONFIGURATION:
     Configuration is possible through a `package.metadata.cargo-xbuild` table

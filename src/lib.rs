@@ -82,14 +82,47 @@ impl CompilationMode {
     }
 }
 
-pub fn run(command_name: &str, help: &str, use_rustc: bool) -> Result<Option<ExitStatus>> {
+pub fn main_common(command_name: &str) {
+    fn show_backtrace() -> bool {
+        env::var("RUST_BACKTRACE").as_ref().map(|s| &s[..]) == Ok("1")
+    }
+
+    match run(command_name) {
+        Err(e) => {
+            let stderr = io::stderr();
+            let mut stderr = stderr.lock();
+
+            writeln!(stderr, "error: {}", e).ok();
+
+            for e in e.iter().skip(1) {
+                writeln!(stderr, "caused by: {}", e).ok();
+            }
+
+            if show_backtrace() {
+                if let Some(backtrace) = e.backtrace() {
+                    writeln!(stderr, "{:?}", backtrace).ok();
+                }
+            } else {
+                writeln!(stderr, "note: run with `RUST_BACKTRACE=1` for a backtrace").ok();
+            }
+
+            process::exit(1)
+        }
+        Ok(Some(status)) => if !status.success() {
+            process::exit(status.code().unwrap_or(1))
+        },
+        Ok(None) => {}
+    }
+}
+
+fn run(command_name: &str) -> Result<Option<ExitStatus>> {
     use cli::Command;
 
     let (command, args) = cli::args(command_name)?;
     match command {
-        Command::Build => Ok(Some(build(args, use_rustc)?)),
+        Command::Build => Ok(Some(build(args, command_name)?)),
         Command::Help => {
-            print!("{}", help);
+            print!(include_str!("help.txt"), command_name = command_name);
             Ok(None)
         }
         Command::Version => {
@@ -103,7 +136,7 @@ pub fn run(command_name: &str, help: &str, use_rustc: bool) -> Result<Option<Exi
     }
 }
 
-fn build(args: cli::Args, use_rustc: bool) -> Result<(ExitStatus)> {
+fn build(args: cli::Args, command_name: &str) -> Result<(ExitStatus)> {
     let verbose = args.verbose();
     let meta = rustc::version();
     let cd = CurrentDirectory::get()?;
@@ -171,7 +204,7 @@ fn build(args: cli::Args, use_rustc: bool) -> Result<(ExitStatus)> {
             &sysroot,
             verbose,
         )?;
-        return xargo::run(&args, &cmode, rustflags, &home, &meta, use_rustc, verbose);
+        return xargo::run(&args, &cmode, rustflags, &home, &meta, command_name, verbose);
     }
 
     cargo::run(&args, verbose)
