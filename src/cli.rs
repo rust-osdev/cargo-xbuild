@@ -30,7 +30,7 @@ impl Args {
 pub fn args(command_name: &str) -> Result<(Command, Args), String> {
     let mut args = env::args().skip(1);
     if args.next() != Some("x".to_string() + command_name) {
-        Err(format!("must be invoked as cargo subcommand: `cargo {}`", command_name))?;
+        Err(format!("must be invoked as cargo subcommand: `cargo x{}`", command_name))?;
     }
     let all = args.collect::<Vec<_>>();
     let command = match all.first().map(|s| s.as_str()) {
