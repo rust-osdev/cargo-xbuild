@@ -1,6 +1,6 @@
 # cargo-xbuild
 
-Cargo-xbuild is a wrapper for `cargo build`, which cross compiles the sysroot crates `core`, `compiler_builtins`, and `alloc` for custom targets. It is a simplified fork of [`xargo`](https://github.com/japaric/xargo), which is in maintaince mode.
+Cargo-xbuild is a wrapper for `cargo build`, which cross compiles the sysroot crates `core`, `compiler_builtins`, and `alloc` for custom targets. It is a simplified fork of [`xargo`](https://github.com/japaric/xargo), which is in maintainance mode.
 
 ## Dependencies
 
