@@ -45,8 +45,7 @@ fn build(
     util::mkdir(&dst)?;
 
     build_libcore(cmode, &ctoml, home, src, &dst, verbose)?;
-    build_libcompiler_builtins(cmode, &ctoml, home, src, &dst, config, verbose)?;
-    build_liballoc(cmode, &ctoml, home, src, &dst, verbose)?;
+    build_liballoc(cmode, &ctoml, home, src, &dst, config, verbose)?;
 
     // Create hash file
     util::write(&rustlib.parent().join(".hash"), &hash.to_string())?;
@@ -114,8 +113,7 @@ fn build_crate(
     }
 
     cmd.arg("--");
-    cmd.arg("--sysroot");
-    cmd.arg(home.display().to_string());
+    cmd.env("RUSTFLAGS", &format!("--sysroot {}", home.display()));
     cmd.arg("-Z");
     cmd.arg("force-unstable-if-unmarked");
 
@@ -162,7 +160,7 @@ version = "0.0.0"
     build_crate("core", stoml, cmode, ctoml, home, dst, verbose)
 }
 
-fn build_libcompiler_builtins(
+fn build_liballoc(
     cmode: &CompilationMode,
     ctoml: &cargo::Toml,
     home: &Home,
@@ -174,53 +172,18 @@ fn build_libcompiler_builtins(
     const TOML: &'static str = r#"
 [package]
 authors = ["The Rust Project Developers"]
-name = "sysroot"
-version = "0.0.0"
-"#;
-
-    let mut stoml = TOML.to_owned();
-
-    let path = src.path()
-        .join("libcompiler_builtins")
-        .display()
-        .to_string();
-    let mut compiler_builtin_dep = Table::new();
-    compiler_builtin_dep.insert("path".to_owned(), Value::String(path));
-
-    let mut features = vec![Value::String("compiler-builtins".to_owned())];
-    if config.memcpy {
-        features.push(Value::String("mem".to_owned()));
-    }
-    compiler_builtin_dep.insert("default-features".to_owned(), Value::Boolean(false));
-    compiler_builtin_dep.insert("features".to_owned(), Value::Array(features));
-    let mut deps = Table::new();
-    deps.insert(
-        "compiler_builtins".to_owned(),
-        Value::Table(compiler_builtin_dep),
-    );
-    let mut map = Table::new();
-    map.insert("dependencies".to_owned(), Value::Table(deps));
-    stoml.push_str(&Value::Table(map).to_string());
-
-    build_crate("compiler_builtins", stoml, cmode, ctoml, home, dst, verbose)
-}
-
-fn build_liballoc(
-    cmode: &CompilationMode,
-    ctoml: &cargo::Toml,
-    home: &Home,
-    src: &Src,
-    dst: &Path,
-    verbose: bool,
-) -> Result<()> {
-    const TOML: &'static str = r#"
-[package]
-authors = ["The Rust Project Developers"]
 name = "alloc"
 version = "0.0.0"
+
+[dependencies.compiler_builtins]
+version = "0.1.0"
 "#;
 
     let mut stoml = TOML.to_owned();
+
+    if config.memcpy {
+        stoml.push_str("features = [\"mem\"]\n");
+    }
 
     let path = src.path().join("liballoc/lib.rs").display().to_string();
     let mut map = Table::new();
