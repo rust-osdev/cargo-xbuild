@@ -44,8 +44,7 @@ fn build(
     let dst = rustlib.parent().join("lib");
     util::mkdir(&dst)?;
 
-    build_libcore(cmode, &ctoml, home, src, &dst, verbose)?;
-    build_liballoc(cmode, &ctoml, home, src, &dst, config, verbose)?;
+    build_liballoc(cmode, &ctoml, src, &dst, config, verbose)?;
 
     // Create hash file
     util::write(&rustlib.parent().join(".hash"), &hash.to_string())?;
@@ -58,7 +57,6 @@ fn build_crate(
     mut stoml: String,
     cmode: &CompilationMode,
     ctoml: &cargo::Toml,
-    home: &Home,
     dst: &Path,
     verbose: bool,
 ) -> Result<()> {
@@ -113,7 +111,6 @@ fn build_crate(
     }
 
     cmd.arg("--");
-    cmd.env("RUSTFLAGS", &format!("--sysroot {}", home.display()));
     cmd.arg("-Z");
     cmd.arg("force-unstable-if-unmarked");
 
@@ -131,39 +128,9 @@ fn build_crate(
     Ok(())
 }
 
-fn build_libcore(
-    cmode: &CompilationMode,
-    ctoml: &cargo::Toml,
-    home: &Home,
-    src: &Src,
-    dst: &Path,
-    verbose: bool,
-) -> Result<()> {
-    const TOML: &'static str = r#"
-[package]
-authors = ["The Rust Project Developers"]
-name = "sysroot"
-version = "0.0.0"
-"#;
-
-    let mut stoml = TOML.to_owned();
-
-    let path = src.path().join("libcore").display().to_string();
-    let mut core_dep = Table::new();
-    core_dep.insert("path".to_owned(), Value::String(path));
-    let mut deps = Table::new();
-    deps.insert("core".to_owned(), Value::Table(core_dep));
-    let mut map = Table::new();
-    map.insert("dependencies".to_owned(), Value::Table(deps));
-    stoml.push_str(&Value::Table(map).to_string());
-
-    build_crate("core", stoml, cmode, ctoml, home, dst, verbose)
-}
-
 fn build_liballoc(
     cmode: &CompilationMode,
     ctoml: &cargo::Toml,
-    home: &Home,
     src: &Src,
     dst: &Path,
     config: &Config,
@@ -182,8 +149,17 @@ version = "0.1.0"
     let mut stoml = TOML.to_owned();
 
     if config.memcpy {
-        stoml.push_str("features = [\"mem\"]\n");
+        stoml.push_str("features = [\"mem\", \"core\"]\n");
+    } else {
+        stoml.push_str("features = [\"rustc-std-workspace-core\"]\n");
     }
+
+    stoml.push_str("[dependencies.core]\n");
+    stoml.push_str(&format!("path = \"{}\"\n", src.path().join("libcore").display()));
+
+    stoml.push_str("[patch.crates-io.rustc-std-workspace-core]\n");
+    stoml.push_str(&format!("path = '{}'\n",
+        src.path().join("tools/rustc-std-workspace-core").display()));
 
     let path = src.path().join("liballoc/lib.rs").display().to_string();
     let mut map = Table::new();
@@ -193,7 +169,7 @@ version = "0.1.0"
     map.insert("lib".to_owned(), Value::Table(lib));
     stoml.push_str(&Value::Table(map).to_string());
 
-    build_crate("alloc", stoml, cmode, ctoml, home, dst, verbose)
+    build_crate("alloc", stoml, cmode, ctoml, dst, verbose)
 }
 
 fn old_hash(cmode: &CompilationMode, home: &Home) -> Result<Option<u64>> {
