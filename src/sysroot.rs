@@ -268,7 +268,7 @@ pub fn update(
         &dst,
     ) {
         Ok(()) => {},
-        _ => { writeln!(stderr, "Unable to copy the directory 'lib' from sysroot").ok(); }
+        Err(e) => { writeln!(stderr, "Unable to copy the directory 'lib' from sysroot: {}", e).ok(); }
     };
 
     let bin_dst = lock.parent().join("bin");
@@ -282,7 +282,7 @@ pub fn update(
         &bin_dst,
     ) {
         Ok(()) => {},
-        _ => { writeln!(stderr, "Unable to copy the directory 'bin' from sysroot").ok(); }
+        Err(e) => { writeln!(stderr, "Unable to copy the directory 'bin' from sysroot: {}", e).ok(); }
     };
 
     util::write(&hfile, hash)?;
