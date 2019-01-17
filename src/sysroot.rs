@@ -3,6 +3,8 @@ use std::env;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::process::Command;
+use std::io;
+use std::io::Write;
 
 use rustc_version::VersionMeta;
 use tempdir::TempDir;
@@ -230,6 +232,7 @@ pub fn update(
     verbose: bool,
 ) -> Result<()> {
     let ctoml = cargo::toml(root)?;
+    let mut stderr = io::stderr();
 
     let hash = hash(cmode, rustflags, &ctoml, meta, config)?;
 
@@ -256,25 +259,31 @@ pub fn update(
         .chain_err(|| format!("couldn't clear {}", lock.path().display()))?;
     let dst = lock.parent().join("lib");
     util::mkdir(&dst)?;
-    util::cp_r(
+    match util::cp_r(
         &sysroot
             .path()
             .join("lib/rustlib")
             .join(&meta.host)
             .join("lib"),
         &dst,
-    )?;
+    ) {
+        Ok(()) => {},
+        _ => { writeln!(stderr, "Unable to copy the directory 'lib' from sysroot").ok(); }
+    };
 
     let bin_dst = lock.parent().join("bin");
     util::mkdir(&bin_dst)?;
-    util::cp_r(
+    match util::cp_r(
         &sysroot
             .path()
             .join("lib/rustlib")
             .join(&meta.host)
             .join("bin"),
         &bin_dst,
-    )?;
+    ) {
+        Ok(()) => {},
+        _ => { writeln!(stderr, "Unable to copy the directory 'bin' from sysroot").ok(); }
+    };
 
     util::write(&hfile, hash)?;
 
