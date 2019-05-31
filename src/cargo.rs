@@ -43,7 +43,11 @@ impl Rustflags {
 
     /// Stringifies these flags for Xargo consumption
     pub fn for_xargo(&self, home: &Home) -> Result<String> {
-        let sysroot = format!("{}", home.display());
+        let sysroot = if let Ok(path) = env::var("XBUILD_SYSROOT_PATH") {
+            path
+        } else {
+            format!("{}", home.display())
+        };
         if env::var_os("XBUILD_ALLOW_SYSROOT_SPACES").is_none() && sysroot.contains(" ") {
             return Err(format!("Sysroot must not contain spaces!\n\
             See issue https://github.com/rust-lang/cargo/issues/6139\n\n\
