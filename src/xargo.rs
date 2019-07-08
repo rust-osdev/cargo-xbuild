@@ -32,8 +32,10 @@ pub fn run(
     let flags = rustflags.for_xargo(home)?;
     if verbose {
         writeln!(io::stderr(), "+ RUSTFLAGS={:?}", flags).ok();
+        writeln!(io::stderr(), "+ RUSTDOCFLAGS={:?}", flags).ok();
     }
-    cmd.env("RUSTFLAGS", flags);
+    cmd.env("RUSTFLAGS", &flags);
+    cmd.env("RUSTDOCFLAGS", &flags);
 
     let locks = (home.lock_ro(&meta.host), home.lock_ro(cmode.triple()));
 
