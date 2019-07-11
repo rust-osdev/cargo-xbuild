@@ -5,6 +5,8 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 
+- Don't append a `--sysroot` argument to `RUSTFLAGS` if it already contains one ([#40](https://github.com/rust-osdev/cargo-xbuild/pull/40))
+
 ## [v0.5.13] - 2019-07-09
 
 - Add `cargo xdoc` command for invoking `cargo doc` ([#39](https://github.com/rust-osdev/cargo-xbuild/pull/39)).

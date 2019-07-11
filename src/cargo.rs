@@ -52,8 +52,10 @@ impl Rustflags {
             environment variable.", sysroot).into());
         }
         let mut flags = self.flags.clone();
-        flags.push("--sysroot".to_owned());
-        flags.push(sysroot);
+        if !flags.contains(&String::from("--sysroot")) {
+            flags.push("--sysroot".to_owned());
+            flags.push(sysroot);
+        }
         Ok(flags.join(" "))
     }
 }
