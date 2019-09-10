@@ -196,6 +196,16 @@ fn build(args: cli::Args, command_name: &str) -> Result<ExitStatus> {
         }
     };
 
+    if let Some(CompilationMode::Native(_)) = cmode {
+        eprintln!(
+            "WARNING: You're currently building for the host system. This is likely an \
+            error and will cause build scripts of dependencies to break.\n\n\
+
+            To build for the target system either pass a `--target` argument or \
+            set the build.target configuration key in a `.cargo/config` file.\n",
+        );
+    }
+
     if let Some(cmode) = cmode {
         let home = xargo::home(root, &crate_config)?;
         let rustflags = cargo::rustflags(config.as_ref(), cmode.triple())?;

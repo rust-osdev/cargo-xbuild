@@ -5,6 +5,9 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 
+- Print a warning when building for the host system because this is often unintended.
+    - Building for the host system will also cause errors in build scripts of dependencies, which try to use the standard library. The reason is that [cargo applies the `RUSTFLAGS` environment variable also to build scripts in native compilation mode](https://github.com/rust-lang/cargo/blob/d9ff5762fe2a08d329fd869c6bb6b073796666cc/src/cargo/core/compiler/build_context/target_info.rs#L394-L395), thereby overriding the sysroot.
+
 ## [v0.5.15] - 2019-07-17
 
 - Add xb, xt, xc, and xr subcommands ([#42](https://github.com/rust-osdev/cargo-xbuild/pull/42))
