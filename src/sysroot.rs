@@ -77,6 +77,7 @@ fn build_crate(
     let cargo = std::env::var("CARGO").unwrap_or("cargo".to_string());
     let mut cmd = Command::new(cargo);
     cmd.env_remove("RUSTFLAGS");
+    cmd.env("RUSTC_BOOTSTRAP", "1");
     cmd.env("CARGO_TARGET_DIR", &target_dir);
     cmd.env("__CARGO_DEFAULT_LIB_METADATA", "XARGO");
 

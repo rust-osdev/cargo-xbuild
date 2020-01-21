@@ -156,26 +156,18 @@ fn build(args: cli::Args, command_name: &str) -> Result<ExitStatus> {
     let crate_config = config::Config::from_metadata(&metadata)
         .map_err(|_| "parsing package.metadata.cargo-xbuild section failed")?;
 
-    // We can't build sysroot with stable or beta due to unstable features
     let sysroot = rustc::sysroot(verbose)?;
     let src = match meta.channel {
         Channel::Dev => rustc::Src::from_env().ok_or(
             "The XARGO_RUST_SRC env variable must be set and point to the \
              Rust source directory when working with the 'dev' channel",
         )?,
-        Channel::Nightly => {
+        Channel::Stable | Channel::Beta | Channel::Nightly => {
             if let Some(src) = rustc::Src::from_env() {
                 src
             } else {
                 sysroot.src()?
             }
-        }
-        Channel::Stable | Channel::Beta => {
-            bail!(
-                "The sysroot can't be built for the {:?} channel. \
-                 Switch to nightly.",
-                meta.channel
-            );
         }
     };
 
