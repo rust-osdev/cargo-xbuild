@@ -64,6 +64,7 @@ fn build_crate(
 ) -> Result<()> {
     let td = TempDir::new("xargo").chain_err(|| "couldn't create a temporary directory")?;
     let td = td.path();
+    let target_dir = td.join("target");
 
     if let Some(profile) = ctoml.profile() {
         stoml.push_str(&profile.to_string())
@@ -75,8 +76,8 @@ fn build_crate(
 
     let cargo = std::env::var("CARGO").unwrap_or("cargo".to_string());
     let mut cmd = Command::new(cargo);
-    cmd.env_remove("CARGO_TARGET_DIR");
     cmd.env_remove("RUSTFLAGS");
+    cmd.env("CARGO_TARGET_DIR", &target_dir);
     cmd.env("__CARGO_DEFAULT_LIB_METADATA", "XARGO");
 
     // As of rust-lang/cargo#4788 Cargo invokes rustc with a changed "current directory" so
@@ -121,10 +122,7 @@ fn build_crate(
 
     // Copy artifacts to Xargo sysroot
     util::cp_r(
-        &td.join("target")
-            .join(cmode.triple())
-            .join(profile())
-            .join("deps"),
+        &target_dir.join(cmode.triple()).join(profile()).join("deps"),
         dst,
     )?;
 
