@@ -29,7 +29,7 @@ version = "0.7.2"
 default-features = false
 
 [dependencies.cargo_metadata]
-version = "0.5.5"
+version = "0.9.1"
 default-features = false
 
 [dev-dependencies]
@@ -40,4 +40,4 @@ version = "0.3.6"
 
 [features]
 dev = []
-backtrace = ["error-chain/backtrace", "cargo_metadata/backtrace"]
+backtrace = ["error-chain/backtrace"]

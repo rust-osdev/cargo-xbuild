@@ -2,6 +2,8 @@ use cargo_metadata;
 use serde_json;
 use std::path::PathBuf;
 
+use errors::*;
+
 #[derive(Debug, Hash)]
 pub struct Config {
     pub memcpy: bool,
@@ -17,13 +19,27 @@ struct ParseConfig {
 }
 
 impl Config {
-    pub fn from_metadata(metadata: &cargo_metadata::Metadata) -> Result<Config, serde_json::Error> {
-        let package_metadata = metadata.packages.first().map(|p| &p.metadata);
-        let crate_metadata = package_metadata
+    pub fn from_metadata(metadata: &cargo_metadata::Metadata) -> Result<Config> {
+        let root_package_id = metadata
+            .resolve
             .as_ref()
-            .and_then(|m| m.get("cargo-xbuild"));
+            .and_then(|resolve| resolve.root.clone())
+            .ok_or("Cannot infer the root project id")?;
+
+        // Find the root package by id in the list of packages. It is logical error if the root
+        // package is not found in the list.
+        let root_package = metadata
+            .packages
+            .iter()
+            .find(|package| package.id == root_package_id)
+            .expect("The package is not found in the `cargo metadata` output");
+
+        let crate_metadata = root_package.metadata.get("cargo-xbuild");
         let config = match crate_metadata {
-            Some(json) => serde_json::from_value(json.clone())?,
+            Some(json) => {
+                serde_json::from_value(json.clone())
+                    .map_err(|_| "parsing package.metadata.cargo-xbuild section failed")?
+            }
             None => ParseConfig::default(),
         };
 

@@ -150,8 +150,13 @@ fn build(args: cli::Args, command_name: &str) -> Result<ExitStatus> {
     let cd = CurrentDirectory::get()?;
     let config = cargo::config()?;
 
-    let metadata =
-        cargo_metadata::metadata(args.manifest_path()).expect("cargo metadata invocation failed");
+    let mut cmd = cargo_metadata::MetadataCommand::new();
+    if let Some(manifest_path) = args.manifest_path() {
+        cmd.manifest_path(manifest_path);
+    }
+    let metadata = cmd
+        .exec()
+        .expect("cargo metadata invocation failed");
     let root = Path::new(&metadata.workspace_root);
     let crate_config = config::Config::from_metadata(&metadata)
         .map_err(|_| "parsing package.metadata.cargo-xbuild section failed")?;
