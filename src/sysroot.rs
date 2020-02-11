@@ -162,6 +162,10 @@ version = "0.1.0"
         src.path().join("libcore").display()
     ));
 
+    if config.panic_immediate_abort {
+        stoml.push_str("features = ['panic_immediate_abort']\n");
+    }
+
     stoml.push_str("[patch.crates-io.rustc-std-workspace-core]\n");
     stoml.push_str(&format!(
         "path = '{}'\n",

@@ -17,5 +17,6 @@ CONFIGURATION:
     [package.metadata.cargo-xbuild]
     memcpy = true
     sysroot_path = "target/sysroot"
+    panic_immediate_abort = false
 
     See README.md for a description of these flags.

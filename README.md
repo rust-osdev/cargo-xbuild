@@ -37,10 +37,12 @@ To configure `cargo-xbuild` create a `package.metadata.cargo-xbuild` table in yo
 [package.metadata.cargo-xbuild]
 memcpy = true
 sysroot_path = "target/sysroot"
+panic_immediate_abort = false
 ```
 
 - The `memcpy` flag defines whether the `mem` feature of the `compiler_builtins` crate should be activated. Turning this flag off allows to specify own versions of the `memcpy`, `memset` etc. functions.
 - The `sysroot_path` flag specifies the directory where the sysroot should be placed.
+- The `panic_immediate_abort` flag specifies whether the `panic_immediate_abort` feature the of `core` crate should be defined.
 
 ### Environment Variables
 
