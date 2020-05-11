@@ -74,8 +74,11 @@ fn build_crate(
 
     let target_dir = td.join("target");
 
-    if let Some(profile) = ctoml.profile() {
+    if let Some(mut profile) = ctoml.profile() {
+        profile.set_lto();
         stoml.push_str(&profile.to_string())
+    } else {
+        stoml.push_str("[profile.release]\nlto = true");
     }
 
     util::write(&td.join("Cargo.toml"), &stoml)?;

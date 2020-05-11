@@ -194,11 +194,11 @@ pub fn config() -> Result<Option<Config>> {
     }
 }
 
-pub struct Profile<'t> {
-    table: &'t Value,
+pub struct Profile {
+    table: Value,
 }
 
-impl<'t> Profile<'t> {
+impl Profile {
     pub fn hash<H>(&self, hasher: &mut H)
     where
         H: Hasher,
@@ -218,9 +218,13 @@ impl<'t> Profile<'t> {
 
         v.to_string().hash(hasher);
     }
+
+    pub fn set_lto(&mut self) {
+        self.table.as_table_mut().expect("[profile.release] not a table").insert("lto".into(), Value::Boolean(true));
+    }
 }
 
-impl<'t> fmt::Display for Profile<'t> {
+impl fmt::Display for Profile {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut map = toml::map::Map::new();
         map.insert("profile".to_owned(), {
@@ -243,7 +247,7 @@ impl Toml {
         self.table
             .get("profile")
             .and_then(|v| v.get("release"))
-            .map(|t| Profile { table: t })
+            .map(|t| Profile { table: t.clone() })
     }
 }
 
