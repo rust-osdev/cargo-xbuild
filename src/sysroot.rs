@@ -1,5 +1,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::env;
+use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io;
 use std::io::Write;
@@ -56,6 +57,7 @@ fn build(
 
 fn build_crate(
     crate_name: &str,
+    lockfile: &Path,
     mut stoml: String,
     cmode: &CompilationMode,
     ctoml: &cargo::Toml,
@@ -79,6 +81,10 @@ fn build_crate(
     }
 
     util::write(&td.join("Cargo.toml"), &stoml)?;
+    fs::copy(lockfile, &td.join("Cargo.lock")).chain_err(||
+        format!("failed to copy Cargo.lock from `{}` to `{}`",
+            lockfile.display(), &td.join("Cargo.lock").display())
+    )?;
     util::mkdir(&td.join("src"))?;
     util::write(&td.join("src/lib.rs"), "")?;
 
@@ -188,7 +194,9 @@ version = "0.1.0"
     map.insert("lib".to_owned(), Value::Table(lib));
     stoml.push_str(&Value::Table(map).to_string());
 
-    build_crate("alloc", stoml, cmode, ctoml, dst, verbose)
+    let lockfile = src.path().join("..").join("Cargo.lock");
+
+    build_crate("alloc", &lockfile, stoml, cmode, ctoml, dst, verbose)
 }
 
 fn old_hash(cmode: &CompilationMode, home: &Home) -> Result<Option<u64>> {
