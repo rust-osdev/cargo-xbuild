@@ -19,7 +19,7 @@ struct ParseConfig {
 }
 
 impl Config {
-    pub fn from_metadata(metadata: &cargo_metadata::Metadata) -> Result<Config> {
+    pub fn from_metadata(metadata: &cargo_metadata::Metadata, quiet: bool) -> Result<Config> {
         let root_manifest = metadata.workspace_root.join("Cargo.toml");
         let root_package = metadata
             .packages
@@ -49,9 +49,11 @@ impl Config {
                 //
                 // So we can't read the config for such projects. To make this transparent to
                 // the user, we print a warning.
-                eprintln!(
-                    "WARNING: There is no root package to read the cargo-xbuild config from."
-                );
+                if !quiet {
+                    eprintln!(
+                        "WARNING: There is no root package to read the cargo-xbuild config from."
+                    );
+                }
                 // There is no config to read, so we use default options
                 ParseConfig::default()
             }

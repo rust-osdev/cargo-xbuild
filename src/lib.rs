@@ -167,7 +167,7 @@ pub fn build(args: Args, command_name: &str, crate_config: Option<Config>) -> Re
 
     // Fall back to manifest if config not explicitly specified
     let crate_config = crate_config.map(Ok).unwrap_or_else(|| {
-        Config::from_metadata(&metadata).map_err(|e| {
+        Config::from_metadata(&metadata, args.quiet()).map_err(|e| {
             format!(
                 "reading package.metadata.cargo-xbuild section failed: {}",
                 e
