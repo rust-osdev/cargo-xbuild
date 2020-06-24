@@ -11,7 +11,7 @@ extern crate rustc_version;
 extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
-extern crate tempdir;
+extern crate tempfile;
 extern crate toml;
 extern crate walkdir;
 

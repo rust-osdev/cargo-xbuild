@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::Command;
 
 use rustc_version::VersionMeta;
-use tempdir::TempDir;
+use tempfile::Builder;
 use toml::{value::Table, Value};
 
 use cargo;
@@ -64,7 +64,7 @@ fn build_crate(
     dst: &Path,
     verbose: bool,
 ) -> Result<()> {
-    let td = TempDir::new("cargo-xbuild").chain_err(|| "couldn't create a temporary directory")?;
+    let td = Builder::new().prefix("cargo-xbuild").tempdir().chain_err(|| "couldn't create a temporary directory")?;
     let td_path;
     let td = if env::var_os("XBUILD_KEEP_TEMP").is_some() {
         td_path = td.into_path();
