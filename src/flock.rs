@@ -2,7 +2,6 @@
 //! other Cargo stuff
 
 use std::fs::{File, OpenOptions};
-use std::io::Write;
 use std::path::{Display, Path, PathBuf};
 use std::{fs, io};
 
@@ -181,13 +180,11 @@ fn acquire(
     }
 
     if !quiet {
-        writeln!(
-            io::stderr(),
+        eprintln!(
             "{:>12} waiting for file lock on {}",
             "Blocking",
             msg
         )
-        .ok();
     }
 
     block()
