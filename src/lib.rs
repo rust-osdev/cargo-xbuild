@@ -16,10 +16,9 @@ extern crate toml;
 extern crate walkdir;
 
 use std::hash::{Hash, Hasher};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
-use std::{env, io, process};
+use std::{env, process};
 
 use rustc_version::Channel;
 
@@ -96,21 +95,18 @@ pub fn main_common(command_name: &str) {
 
     match run(command_name) {
         Err(e) => {
-            let stderr = io::stderr();
-            let mut stderr = stderr.lock();
-
-            writeln!(stderr, "error: {}", e).ok();
+            eprintln!("error: {}", e);
 
             for e in e.iter().skip(1) {
-                writeln!(stderr, "caused by: {}", e).ok();
+                eprintln!("caused by: {}", e);
             }
 
             if show_backtrace() {
                 if let Some(backtrace) = e.backtrace() {
-                    writeln!(stderr, "{:?}", backtrace).ok();
+                    eprintln!("{:?}", backtrace);
                 }
             } else {
-                writeln!(stderr, "note: run with `RUST_BACKTRACE=1` for a backtrace").ok();
+                eprintln!("note: run with `RUST_BACKTRACE=1` for a backtrace");
             }
 
             process::exit(1)
@@ -135,12 +131,10 @@ fn run(command_name: &str) -> Result<Option<ExitStatus>> {
             Ok(None)
         }
         Command::Version => {
-            writeln!(
-                io::stdout(),
+            println!(
                 concat!("cargo-xbuild ", env!("CARGO_PKG_VERSION"), "{}"),
                 include_str!(concat!(env!("OUT_DIR"), "/commit-info.txt"))
-            )
-            .unwrap();
+            );
             Ok(None)
         }
     }
