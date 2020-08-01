@@ -1,9 +1,8 @@
-use std::io::{self, Write};
+use std::env;
 use std::mem;
 use std::path::Path;
 use std::path::{Display, PathBuf};
 use std::process::{Command, ExitStatus};
-use std::env;
 
 use rustc_version::VersionMeta;
 
@@ -31,8 +30,8 @@ pub fn run(
 
     let flags = rustflags.for_xargo(home)?;
     if verbose {
-        writeln!(io::stderr(), "+ RUSTFLAGS={:?}", flags).ok();
-        writeln!(io::stderr(), "+ RUSTDOCFLAGS={:?}", flags).ok();
+        eprintln!("+ RUSTFLAGS={:?}", flags);
+        eprintln!("+ RUSTDOCFLAGS={:?}", flags);
     }
     cmd.env("RUSTFLAGS", &flags);
     cmd.env("RUSTDOCFLAGS", &flags);
@@ -70,7 +69,13 @@ impl Home {
         let fs = self.path(triple);
 
         fs.open_rw(".sentinel", &format!("{}'s sysroot", triple))
-            .chain_err(|| format!("couldn't lock {}'s sysroot in {} as read-write", triple, fs.display()))
+            .chain_err(|| {
+                format!(
+                    "couldn't lock {}'s sysroot in {} as read-write",
+                    triple,
+                    fs.display()
+                )
+            })
     }
 }
 
