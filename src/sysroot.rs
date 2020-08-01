@@ -2,8 +2,6 @@ use std::collections::hash_map::DefaultHasher;
 use std::env;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::io;
-use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
@@ -64,7 +62,10 @@ fn build_crate(
     dst: &Path,
     verbose: bool,
 ) -> Result<()> {
-    let td = Builder::new().prefix("cargo-xbuild").tempdir().chain_err(|| "couldn't create a temporary directory")?;
+    let td = Builder::new()
+        .prefix("cargo-xbuild")
+        .tempdir()
+        .chain_err(|| "couldn't create a temporary directory")?;
     let td_path;
     let td = if env::var_os("XBUILD_KEEP_TEMP").is_some() {
         td_path = td.into_path();
@@ -85,10 +86,13 @@ fn build_crate(
     }
 
     util::write(&td.join("Cargo.toml"), &stoml)?;
-    fs::copy(lockfile, &td.join("Cargo.lock")).chain_err(||
-        format!("failed to copy Cargo.lock from `{}` to `{}`",
-            lockfile.display(), &td.join("Cargo.lock").display())
-    )?;
+    fs::copy(lockfile, &td.join("Cargo.lock")).chain_err(|| {
+        format!(
+            "failed to copy Cargo.lock from `{}` to `{}`",
+            lockfile.display(),
+            &td.join("Cargo.lock").display()
+        )
+    })?;
     util::mkdir(&td.join("src"))?;
     util::write(&td.join("src/lib.rs"), "")?;
 
@@ -261,7 +265,6 @@ pub fn update(
     verbose: bool,
 ) -> Result<()> {
     let ctoml = cargo::toml(root)?;
-    let mut stderr = io::stderr();
 
     let hash = hash(cmode, rustflags, &ctoml, meta, config)?;
 
@@ -298,14 +301,7 @@ pub fn update(
         &dst,
     ) {
         Ok(()) => {}
-        Err(e) => {
-            writeln!(
-                stderr,
-                "Unable to copy the directory 'lib' from sysroot: {}",
-                e
-            )
-            .ok();
-        }
+        Err(e) => eprintln!("Unable to copy the directory 'lib' from sysroot: {}", e),
     };
 
     let bin_dst = lock.parent().join("bin");
@@ -320,14 +316,7 @@ pub fn update(
         &bin_dst,
     ) {
         Ok(()) => {}
-        Err(e) => {
-            writeln!(
-                stderr,
-                "Unable to copy the directory 'bin' from sysroot: {}",
-                e
-            )
-            .ok();
-        }
+        Err(e) => eprintln!("Unable to copy the directory 'bin' from sysroot: {}", e),
     };
 
     util::write(&hfile, hash)?;
