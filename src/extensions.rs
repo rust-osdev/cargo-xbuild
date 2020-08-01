@@ -1,5 +1,3 @@
-use std::io;
-use std::io::Write;
 use std::process::{Command, ExitStatus};
 
 use errors::*;
@@ -29,7 +27,7 @@ impl CommandExt for Command {
     /// Runs the command to completion
     fn run_and_get_status(&mut self, verbose: bool) -> Result<ExitStatus> {
         if verbose {
-            writeln!(io::stderr(), "+ {:?}", self).ok();
+            eprintln!("+ {:?}", self);
         }
 
         self.status()
@@ -39,7 +37,7 @@ impl CommandExt for Command {
     /// Runs the command to completion and returns its stdout
     fn run_and_get_stdout(&mut self, verbose: bool) -> Result<String> {
         if verbose {
-            writeln!(io::stderr(), "+ {:?}", self).ok();
+            eprintln!("+ {:?}", self);
         }
 
         let out = self
