@@ -177,7 +177,7 @@ version = "0.1.0"
     stoml.push_str("[dependencies.core]\n");
     stoml.push_str(&format!(
         "path = '{}'\n",
-        src.path().join("libcore").display()
+        src.path().join("core").display()
     ));
 
     if config.panic_immediate_abort {
@@ -187,10 +187,10 @@ version = "0.1.0"
     stoml.push_str("[patch.crates-io.rustc-std-workspace-core]\n");
     stoml.push_str(&format!(
         "path = '{}'\n",
-        src.path().join("tools/rustc-std-workspace-core").display()
+        src.path().join("rustc-std-workspace-core").display()
     ));
 
-    let path = src.path().join("liballoc/lib.rs").display().to_string();
+    let path = src.path().join("alloc/src/lib.rs").display().to_string();
     let mut map = Table::new();
     let mut lib = Table::new();
     lib.insert("name".to_owned(), Value::String("alloc".to_owned()));

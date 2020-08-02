@@ -56,7 +56,7 @@ In addition to the above configuration keys, `cargo-xbuild` can be also configur
 If you want to use a local Rust source instead of `rust-src` rustup component, you can set the `XARGO_RUST_SRC` environment variable.
 
 ```
-# The source of the `core` crate must be in `$XARGO_RUST_SRC/libcore`
+# The source of the `core` crate must be in `$XARGO_RUST_SRC/core`
 $ export XARGO_RUST_SRC=/path/to/rust/src
 
 $ cargo xbuild --target msp430-none-elf.json
