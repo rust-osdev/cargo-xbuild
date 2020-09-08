@@ -31,6 +31,9 @@ default-features = false
 version = "0.9.1"
 default-features = false
 
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["winerror", "fileapi", "winbase", "std"] }
+
 [dev-dependencies]
 lazy_static = "1.4"
 

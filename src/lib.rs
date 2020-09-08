@@ -13,6 +13,8 @@ extern crate serde_derive;
 extern crate tempfile;
 extern crate toml;
 extern crate walkdir;
+#[cfg(windows)]
+extern crate winapi;
 
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
