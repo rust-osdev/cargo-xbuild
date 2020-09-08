@@ -14,7 +14,6 @@ version = "0.6.0"
 name = "xargo_lib"
 
 [dependencies]
-fs2 = "0.4.1"
 libc = "0.2.18"
 rustc_version = "0.2"
 serde = "1.0"

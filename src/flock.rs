@@ -5,8 +5,7 @@ use std::fs::{File, OpenOptions};
 use std::path::{Display, Path, PathBuf};
 use std::{fs, io};
 
-use fs2;
-use fs2::FileExt;
+use self::sys::*;
 
 #[derive(PartialEq)]
 enum State {
@@ -107,12 +106,12 @@ impl Filesystem {
 
         match state {
             State::Exclusive => {
-                acquire(msg, &path, self.quiet, &|| f.try_lock_exclusive(), &|| {
-                    f.lock_exclusive()
+                acquire(msg, &path, self.quiet, &|| try_lock_exclusive(&f), &|| {
+                    lock_exclusive(&f)
                 })?;
             }
             State::Shared => {
-                acquire(msg, &path, self.quiet, &|| f.try_lock_shared(), &|| f.lock_shared())?;
+                acquire(msg, &path, self.quiet, &|| try_lock_shared(&f), &|| lock_shared(&f))?;
             }
         }
 
@@ -129,7 +128,7 @@ impl Filesystem {
 
 impl Drop for FileLock {
     fn drop(&mut self) {
-        self.file.unlock().ok();
+        unlock(&self.file).ok();
     }
 }
 
@@ -137,8 +136,8 @@ fn acquire(
     msg: &str,
     path: &Path,
     quiet: bool,
-    try: &dyn Fn() -> io::Result<()>,
-    block: &dyn Fn() -> io::Result<()>,
+    lock_try: &dyn Fn() -> io::Result<()>,
+    lock_block: &dyn Fn() -> io::Result<()>,
 ) -> io::Result<()> {
     #[cfg(all(target_os = "linux", not(target_env = "musl")))]
     fn is_on_nfs_mount(path: &Path) -> bool {
@@ -168,12 +167,16 @@ fn acquire(
         return Ok(());
     }
 
-    match try() {
-        Ok(_) => return Ok(()),
-        #[cfg(target_os = "macos")]
-        Err(ref e) if e.raw_os_error() == Some(::libc::ENOTSUP) => return Ok(()),
+    match lock_try() {
+        Ok(()) => return Ok(()),
+
+        // In addition to ignoring NFS which is commonly not working we also
+        // just ignore locking on filesystems that look like they don't
+        // implement file locking.
+        Err(e) if error_unsupported(&e) => return Ok(()),
+
         Err(e) => {
-            if e.raw_os_error() != fs2::lock_contended_error().raw_os_error() {
+            if !error_contended(&e) {
                 return Err(e);
             }
         }
@@ -187,7 +190,125 @@ fn acquire(
         )
     }
 
-    block()
+    lock_block()
+}
+
+#[cfg(unix)]
+mod sys {
+    use std::fs::File;
+    use std::io::{Error, Result};
+    use std::os::unix::io::AsRawFd;
+
+    pub(super) fn lock_shared(file: &File) -> Result<()> {
+        flock(file, libc::LOCK_SH)
+    }
+
+    pub(super) fn lock_exclusive(file: &File) -> Result<()> {
+        flock(file, libc::LOCK_EX)
+    }
+
+    pub(super) fn try_lock_shared(file: &File) -> Result<()> {
+        flock(file, libc::LOCK_SH | libc::LOCK_NB)
+    }
+
+    pub(super) fn try_lock_exclusive(file: &File) -> Result<()> {
+        flock(file, libc::LOCK_EX | libc::LOCK_NB)
+    }
+
+    pub(super) fn unlock(file: &File) -> Result<()> {
+        flock(file, libc::LOCK_UN)
+    }
+
+    pub(super) fn error_contended(err: &Error) -> bool {
+        err.raw_os_error().map_or(false, |x| x == libc::EWOULDBLOCK)
+    }
+
+    pub(super) fn error_unsupported(err: &Error) -> bool {
+        match err.raw_os_error() {
+            Some(libc::ENOTSUP) => true,
+            #[cfg(target_os = "linux")]
+            Some(libc::ENOSYS) => true,
+            _ => false,
+        }
+    }
+
+    #[cfg(not(target_os = "solaris"))]
+    fn flock(file: &File, flag: libc::c_int) -> Result<()> {
+        let ret = unsafe { libc::flock(file.as_raw_fd(), flag) };
+        if ret < 0 {
+            Err(Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    #[cfg(target_os = "solaris")]
+    fn flock(file: &File, flag: libc::c_int) -> Result<()> {
+        // Solaris lacks flock(), so simply succeed with a no-op
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+mod sys {
+    use std::fs::File;
+    use std::io::{Error, Result};
+    use std::mem;
+    use std::os::windows::io::AsRawHandle;
+
+    use winapi::shared::minwindef::DWORD;
+    use winapi::shared::winerror::{ERROR_INVALID_FUNCTION, ERROR_LOCK_VIOLATION};
+    use winapi::um::fileapi::{LockFileEx, UnlockFile};
+    use winapi::um::minwinbase::{LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY};
+
+    pub(super) fn lock_shared(file: &File) -> Result<()> {
+        lock_file(file, 0)
+    }
+
+    pub(super) fn lock_exclusive(file: &File) -> Result<()> {
+        lock_file(file, LOCKFILE_EXCLUSIVE_LOCK)
+    }
+
+    pub(super) fn try_lock_shared(file: &File) -> Result<()> {
+        lock_file(file, LOCKFILE_FAIL_IMMEDIATELY)
+    }
+
+    pub(super) fn try_lock_exclusive(file: &File) -> Result<()> {
+        lock_file(file, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY)
+    }
+
+    pub(super) fn error_contended(err: &Error) -> bool {
+        err.raw_os_error()
+            .map_or(false, |x| x == ERROR_LOCK_VIOLATION as i32)
+    }
+
+    pub(super) fn error_unsupported(err: &Error) -> bool {
+        err.raw_os_error()
+            .map_or(false, |x| x == ERROR_INVALID_FUNCTION as i32)
+    }
+
+    pub(super) fn unlock(file: &File) -> Result<()> {
+        unsafe {
+            let ret = UnlockFile(file.as_raw_handle(), 0, 0, !0, !0);
+            if ret == 0 {
+                Err(Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    fn lock_file(file: &File, flags: DWORD) -> Result<()> {
+        unsafe {
+            let mut overlapped = mem::zeroed();
+            let ret = LockFileEx(file.as_raw_handle(), flags, 0, !0, !0, &mut overlapped);
+            if ret == 0 {
+                Err(Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        }
+    }
 }
 
 fn create_dir_all(path: &Path) -> io::Result<()> {
