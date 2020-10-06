@@ -13,7 +13,15 @@ build-std = ["core", "compiler_builtins", "alloc"]
 
 The above requires at least Rust nightly 2020–07–15. With the above config in place, the normal `cargo build` command will now automatically cross-compile the specified sysroot crates.
 
-Since the `build-std` feature currently provides no way to enable the `mem` feature of `compiler_builtins`, you need to add a dependency on the [`rlibc`](https://docs.rs/rlibc/1.0.0/rlibc/) crate to provide implementations of `memset`, `memcpy`, etc, which the compiler expects. Note that you need to add an `extern crate rlibc` statement in order for this to work (even in the 2018 edition of Rust). This is required to get cargo to link the otherwise unused crate.
+The compiler may emit references to `memset`, `memcpy`, etc which are usually provided by the platform's libc but luckily `compiler_builtins` has a `mem` feature that will provide implementations of those functions. To enable that feature we can use the unstable cargo flag `-Z build-std-features=compiler-builtins-mem` or specify the following in a `config.toml`:
+
+```diff
+[unstable]
+build-std = ["core", "compiler_builtins", "alloc"]
++build-std-features = ["compiler-builtins-mem"]
+```
+
+Note that using the `compiler-builtins-mem` requires at least Rust nightly 2020-09-30. For older versions you need to add a dependency on the [`rlibc`](https://docs.rs/rlibc/1.0.0/rlibc/) crate to provide implementations of `memset`, `memcpy`, etc, which the compiler expects. Note that you need to add an `extern crate rlibc` statement in order for this to work (even in the 2018 edition of Rust). This is required to get cargo to link the otherwise unused crate.
 
 Compared to `cargo-xbuild`, there are many advantages of using `cargo`'s own feature:
 
