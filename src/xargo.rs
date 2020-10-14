@@ -4,15 +4,15 @@ use std::path::Path;
 use std::path::{Display, PathBuf};
 use std::process::{Command, ExitStatus};
 
+use anyhow::{Context, Result};
 use rustc_version::VersionMeta;
 
-use cargo::Rustflags;
-use cli::Args;
-use config::Config;
-use errors::*;
-use extensions::CommandExt;
-use flock::{FileLock, Filesystem};
-use CompilationMode;
+use crate::cargo::Rustflags;
+use crate::cli::Args;
+use crate::config::Config;
+use crate::extensions::CommandExt;
+use crate::flock::{FileLock, Filesystem};
+use crate::CompilationMode;
 
 pub fn run(
     args: &Args,
@@ -62,14 +62,14 @@ impl Home {
         let fs = self.path(triple);
 
         fs.open_ro(".sentinel", &format!("{}'s sysroot", triple))
-            .chain_err(|| format!("couldn't lock {}'s sysroot as read-only", triple))
+            .with_context(|| format!("couldn't lock {}'s sysroot as read-only", triple))
     }
 
     pub fn lock_rw(&self, triple: &str) -> Result<FileLock> {
         let fs = self.path(triple);
 
         fs.open_rw(".sentinel", &format!("{}'s sysroot", triple))
-            .chain_err(|| {
+            .with_context(|| {
                 format!(
                     "couldn't lock {}'s sysroot in {} as read-write",
                     triple,

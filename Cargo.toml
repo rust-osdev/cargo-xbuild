@@ -9,40 +9,29 @@ license = "MIT OR Apache-2.0"
 name = "cargo-xbuild"
 repository = "https://github.com/rust-osdev/cargo-xbuild"
 version = "0.6.2"
+edition = "2018"
 
 [lib]
 name = "xargo_lib"
 
 [dependencies]
+anyhow = "1.0"
+cargo_metadata = { version = "0.11", default-features = false }
 libc = "0.2.18"
 rustc_version = "0.2"
-serde = "1.0"
-serde_derive = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tempfile = "3"
 toml = "0.5"
 walkdir = "2.3"
 
-[dependencies.error-chain]
-version = "0.12"
-default-features = false
-
-[dependencies.cargo_metadata]
-version = "0.9.1"
-default-features = false
-
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["winerror", "fileapi", "winbase", "std"] }
 
-[dev-dependencies]
-lazy_static = "1.4"
-
-[dev-dependencies.parking_lot]
-version = "0.10"
-
 [features]
 dev = []
-backtrace = ["error-chain/backtrace"]
+# only usable in nightly version
+backtrace = []
 
 [package.metadata.release]
 no-dev-version = true

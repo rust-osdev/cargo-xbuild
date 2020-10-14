@@ -1,35 +1,18 @@
-extern crate cargo_metadata;
-#[macro_use]
-extern crate error_chain;
-#[cfg(any(
-    all(target_os = "linux", not(target_env = "musl")),
-    target_os = "macos"
-))]
-extern crate libc;
-extern crate rustc_version;
-extern crate serde_json;
-#[macro_use]
-extern crate serde_derive;
-extern crate tempfile;
-extern crate toml;
-extern crate walkdir;
-#[cfg(windows)]
-extern crate winapi;
+#![cfg_attr(feature = "backtrace", feature(backtrace))]
 
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 use std::{env, process};
 
+use anyhow::{anyhow, bail, Context, Result};
 use rustc_version::Channel;
 
-use errors::*;
-use rustc::Target;
+use self::rustc::Target;
 
 mod cargo;
 mod cli;
 mod config;
-mod errors;
 mod extensions;
 mod flock;
 mod rustc;
@@ -37,8 +20,8 @@ mod sysroot;
 mod util;
 mod xargo;
 
-pub use cli::{Args, Verbosity};
-pub use config::Config;
+pub use self::cli::{Args, Verbosity};
+pub use self::config::Config;
 
 // We use a different sysroot for Native compilation to avoid file locking
 //
@@ -90,6 +73,7 @@ impl CompilationMode {
 }
 
 pub fn main_common(command_name: &str) {
+    #[cfg(feature = "backtrace")]
     fn show_backtrace() -> bool {
         env::var("RUST_BACKTRACE").as_ref().map(|s| &s[..]) == Ok("1")
     }
@@ -98,16 +82,17 @@ pub fn main_common(command_name: &str) {
         Err(e) => {
             eprintln!("error: {}", e);
 
-            for e in e.iter().skip(1) {
+            for e in e.chain().into_iter().skip(1) {
                 eprintln!("caused by: {}", e);
             }
 
-            if show_backtrace() {
-                if let Some(backtrace) = e.backtrace() {
-                    eprintln!("{:?}", backtrace);
+            #[cfg(feature = "backtrace")]
+            {
+                if show_backtrace() {
+                    eprintln!("{:?}", e.backtrace());
+                } else {
+                    eprintln!("note: run with `RUST_BACKTRACE=1` for a backtrace");
                 }
-            } else {
-                eprintln!("note: run with `RUST_BACKTRACE=1` for a backtrace");
             }
 
             process::exit(1)
@@ -148,7 +133,7 @@ fn run(command_name: &str) -> Result<Option<ExitStatus>> {
 pub fn build(args: Args, command_name: &str, crate_config: Option<Config>) -> Result<ExitStatus> {
     let verbose = args.verbose();
     let quiet = args.quiet();
-    let meta = rustc::version().map_err(|e| format!("getting rustc version failed: {}", e))?;
+    let meta = rustc::version().map_err(|e| anyhow!("getting rustc version failed: {}", e))?;
     let cd = CurrentDirectory::get()?;
     let config = cargo::config()?;
 
@@ -163,7 +148,7 @@ pub fn build(args: Args, command_name: &str, crate_config: Option<Config>) -> Re
     // Fall back to manifest if config not explicitly specified
     let crate_config = crate_config.map(Ok).unwrap_or_else(|| {
         Config::from_metadata(&metadata, args.quiet()).map_err(|e| {
-            format!(
+            anyhow!(
                 "reading package.metadata.cargo-xbuild section failed: {}",
                 e
             )
@@ -173,10 +158,10 @@ pub fn build(args: Args, command_name: &str, crate_config: Option<Config>) -> Re
     // We can't build sysroot with stable or beta due to unstable features
     let sysroot = rustc::sysroot(verbose)?;
     let src = match meta.channel {
-        Channel::Dev => rustc::Src::from_env().ok_or(
+        Channel::Dev => rustc::Src::from_env().ok_or(anyhow!(
             "The XARGO_RUST_SRC env variable must be set and point to the \
              Rust source directory when working with the 'dev' channel",
-        )?,
+        ))?,
         Channel::Nightly => {
             if let Some(src) = rustc::Src::from_env() {
                 src
@@ -257,7 +242,7 @@ pub struct CurrentDirectory {
 impl CurrentDirectory {
     fn get() -> Result<CurrentDirectory> {
         env::current_dir()
-            .chain_err(|| "couldn't get the current directory")
+            .with_context(|| "couldn't get the current directory")
             .map(|cd| CurrentDirectory { path: cd })
     }
 

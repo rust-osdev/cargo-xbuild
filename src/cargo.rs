@@ -3,13 +3,13 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::{env, fmt};
 
+use anyhow::{anyhow, Context, Result};
 use toml::Value;
 
-use cli::Args;
-use errors::*;
-use extensions::CommandExt;
-use util;
-use xargo::Home;
+use crate::cli::Args;
+use crate::extensions::CommandExt;
+use crate::util;
+use crate::xargo::Home;
 
 pub struct Rustflags {
     flags: Vec<String>,
@@ -44,15 +44,14 @@ impl Rustflags {
     pub fn for_xargo(&self, home: &Home) -> Result<String> {
         let sysroot = format!("{}", home.display());
         if env::var_os("XBUILD_ALLOW_SYSROOT_SPACES").is_none() && sysroot.contains(" ") {
-            return Err(format!(
+            return Err(anyhow!(
                 "Sysroot must not contain spaces!\n\
                 See issue https://github.com/rust-lang/cargo/issues/6139\n\n\
                 The sysroot is `{}`.\n\n\
                 To override this error, you can set the `XBUILD_ALLOW_SYSROOT_SPACES`\
                 environment variable.",
                 sysroot
-            )
-            .into());
+            ));
         }
         let mut flags = self.flags.clone();
         if !flags.contains(&String::from("--sysroot")) {
@@ -115,13 +114,13 @@ fn flags(config: Option<&Config>, target: &str, tool: &str) -> Result<Vec<String
 
             if error {
                 if build {
-                    Err(format!(
+                    Err(anyhow!(
                         ".cargo/config: build.{} must be an array \
                          of strings",
                         tool
                     ))?
                 } else {
-                    Err(format!(
+                    Err(anyhow!(
                         ".cargo/config: target.{}.{} must be an \
                          array of strings",
                         target, tool
@@ -157,11 +156,11 @@ impl Config {
         if let Some(v) = self.table.get("build").and_then(|v| v.get("target")) {
             let target = v
                 .as_str()
-                .ok_or_else(|| format!(".cargo/config: build.target must be a string"))?;
+                .ok_or_else(|| anyhow!(".cargo/config: build.target must be a string"))?;
             if target.ends_with(".json") {
                 let target_path = self.parent_path.join(target);
                 let canonicalized = target_path.canonicalize().map_err(|err| {
-                    format!(
+                    anyhow!(
                         "target JSON file {} does not exist: {}",
                         target_path.display(),
                         err
@@ -170,7 +169,7 @@ impl Config {
                 let as_string = canonicalized
                     .into_os_string()
                     .into_string()
-                    .map_err(|err| format!("target path not valid utf8: {:?}", err))?;
+                    .map_err(|err| anyhow!("target path not valid utf8: {:?}", err))?;
                 Ok(Some(as_string))
             } else {
                 Ok(Some(target.to_owned()))
@@ -182,7 +181,7 @@ impl Config {
 }
 
 pub fn config() -> Result<Option<Config>> {
-    let cd = env::current_dir().chain_err(|| "couldn't get the current directory")?;
+    let cd = env::current_dir().with_context(|| "couldn't get the current directory")?;
 
     if let Some(p) = util::search(&cd, ".cargo/config") {
         Ok(Some(Config {

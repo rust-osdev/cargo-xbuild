@@ -1,6 +1,6 @@
 use std::process::{Command, ExitStatus};
 
-use errors::*;
+use anyhow::{anyhow, Context, Result};
 
 pub trait CommandExt {
     fn run(&mut self, verbose: bool) -> Result<()>;
@@ -16,11 +16,11 @@ impl CommandExt for Command {
         if status.success() {
             Ok(())
         } else {
-            Err(format!(
+            Err(anyhow!(
                 "`{:?}` failed with exit code: {:?}",
                 self,
                 status.code()
-            ))?
+            ))
         }
     }
 
@@ -31,7 +31,7 @@ impl CommandExt for Command {
         }
 
         self.status()
-            .chain_err(|| format!("couldn't execute `{:?}`", self))
+            .with_context(|| format!("couldn't execute `{:?}`", self))
     }
 
     /// Runs the command to completion and returns its stdout
@@ -42,13 +42,13 @@ impl CommandExt for Command {
 
         let out = self
             .output()
-            .chain_err(|| format!("couldn't execute `{:?}`", self))?;
+            .with_context(|| format!("couldn't execute `{:?}`", self))?;
 
         if out.status.success() {
             Ok(String::from_utf8(out.stdout)
-                .chain_err(|| format!("`{:?}` output was not UTF-8", self))?)
+                .with_context(|| format!("`{:?}` output was not UTF-8", self))?)
         } else {
-            Err(format!(
+            Err(anyhow!(
                 "`{:?}` failed with exit code: {:?}",
                 self,
                 out.status.code()

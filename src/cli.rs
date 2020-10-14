@@ -1,6 +1,8 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
+use anyhow::{anyhow, Result};
+
 pub struct Args {
     all: Vec<String>,
     target: Option<String>,
@@ -21,7 +23,7 @@ impl Args {
         manifest_path: Option<P>,
         verbosity: Option<Verbosity>,
         other_args: A,
-    ) -> Result<Self, String>
+    ) -> Result<Self>
     where
         T: Into<String> + Clone,
         P: AsRef<Path>,
@@ -44,7 +46,7 @@ impl Args {
             })
             .collect::<Vec<_>>();
         if !duplicates.is_empty() {
-            return Err(format!(
+            return Err(anyhow!(
                 "The following args should be passed explicitly: {:?}",
                 duplicates
             ));
@@ -77,7 +79,7 @@ impl Args {
     }
 
     /// Parse raw args from command line
-    pub fn from_raw<A, S>(all: A) -> Result<Self, String>
+    pub fn from_raw<A, S>(all: A) -> Result<Self>
     where
         A: IntoIterator<Item = S>,
         S: AsRef<str>,
@@ -105,13 +107,13 @@ impl Args {
                 }
                 if arg == "--verbose" || arg == "-v" || arg == "-vv" {
                     if let Some(Verbosity::Quiet) = verbosity {
-                        return Err("cannot set both --verbose and --quiet".into());
+                        return Err(anyhow!("cannot set both --verbose and --quiet"));
                     }
                     verbosity = Some(Verbosity::Verbose)
                 }
                 if arg == "--quiet" || arg == "-q" {
                     if let Some(Verbosity::Verbose) = verbosity {
-                        return Err("cannot set both --verbose and --quiet".into());
+                        return Err(anyhow!("cannot set both --verbose and --quiet"));
                     }
                     verbosity = Some(Verbosity::Quiet)
                 }
@@ -147,10 +149,10 @@ impl Args {
     }
 }
 
-pub fn args(command_name: &str) -> Result<(Command, Args), String> {
+pub fn args(command_name: &str) -> Result<(Command, Args)> {
     let mut args = env::args().skip(1);
     if args.next() != Some("x".to_string() + command_name) {
-        Err(format!(
+        Err(anyhow!(
             "must be invoked as cargo subcommand: `cargo x{}`",
             command_name
         ))?;

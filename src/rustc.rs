@@ -5,13 +5,12 @@ use std::process::Command;
 
 pub use rustc_version::version_meta as version;
 
-use serde_json;
+use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
 
-use errors::*;
-use extensions::CommandExt;
-use CurrentDirectory;
-use {rustc, util};
+use crate::extensions::CommandExt;
+use crate::CurrentDirectory;
+use crate::{rustc, util};
 
 fn command() -> Command {
     env::var_os("RUSTC")
@@ -74,8 +73,8 @@ impl Sysroot {
             });
         }
 
-        Err("`rust-src` component not found. Run `rustup component add \
-             rust-src`.")?
+        Err(anyhow!("`rust-src` component not found. Run `rustup component add \
+             rust-src`."))
     }
 }
 
@@ -168,7 +167,7 @@ impl Target {
             // Here we roundtrip to/from JSON to get the same hash when some
             // fields of the JSON file has been shuffled around
             serde_json::from_str::<Value>(&util::read(json)?)
-                .chain_err(|| format!("{} is not valid JSON", json.display()))?
+                .with_context(|| format!("{} is not valid JSON", json.display()))?
                 .to_string()
                 .hash(hasher);
         }

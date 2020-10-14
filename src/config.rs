@@ -1,8 +1,7 @@
-use cargo_metadata;
-use serde_json;
 use std::path::PathBuf;
 
-use errors::*;
+use anyhow::{anyhow, Result};
+use serde::Deserialize;
 
 #[derive(Debug, Hash)]
 pub struct Config {
@@ -31,7 +30,7 @@ impl Config {
                 let crate_metadata = root_package.metadata.get("cargo-xbuild");
                 match crate_metadata {
                     Some(json) => serde_json::from_value(json.clone()).map_err(|e| {
-                        format!(
+                        anyhow!(
                             "parsing package.metadata.cargo-xbuild section failed: {}",
                             e
                         )

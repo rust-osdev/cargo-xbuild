@@ -5,19 +5,18 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::process::Command;
 
+use anyhow::{Context, Result};
 use rustc_version::VersionMeta;
 use tempfile::Builder;
 use toml::{value::Table, Value};
 
-use cargo;
-use cargo::Rustflags;
-use config::Config;
-use errors::*;
-use extensions::CommandExt;
-use rustc::{Src, Sysroot, Target};
-use util;
-use xargo::Home;
-use CompilationMode;
+use crate::cargo::{self, Rustflags};
+use crate::config::Config;
+use crate::extensions::CommandExt;
+use crate::rustc::{Src, Sysroot, Target};
+use crate::util;
+use crate::xargo::Home;
+use crate::CompilationMode;
 
 #[cfg(feature = "dev")]
 fn profile() -> &'static str {
@@ -41,7 +40,7 @@ fn build(
     let rustlib = home.lock_rw(cmode.triple())?;
     rustlib
         .remove_siblings()
-        .chain_err(|| format!("couldn't clear {}", rustlib.path().display()))?;
+        .with_context(|| format!("couldn't clear {}", rustlib.path().display()))?;
     let dst = rustlib.parent().join("lib");
     util::mkdir(&dst)?;
 
@@ -65,7 +64,7 @@ fn build_crate(
     let td = Builder::new()
         .prefix("cargo-xbuild")
         .tempdir()
-        .chain_err(|| "couldn't create a temporary directory")?;
+        .with_context(|| "couldn't create a temporary directory")?;
     let td_path;
     let td = if env::var_os("XBUILD_KEEP_TEMP").is_some() {
         td_path = td.into_path();
@@ -86,7 +85,7 @@ fn build_crate(
     }
 
     util::write(&td.join("Cargo.toml"), &stoml)?;
-    fs::copy(lockfile, &td.join("Cargo.lock")).chain_err(|| {
+    fs::copy(lockfile, &td.join("Cargo.lock")).with_context(|| {
         format!(
             "failed to copy Cargo.lock from `{}` to `{}`",
             lockfile.display(),
@@ -288,7 +287,7 @@ pub fn update(
     }
 
     lock.remove_siblings()
-        .chain_err(|| format!("couldn't clear {}", lock.path().display()))?;
+        .with_context(|| format!("couldn't clear {}", lock.path().display()))?;
     let dst = lock.parent().join("lib");
     util::mkdir(&dst)?;
     match util::cp_r(
