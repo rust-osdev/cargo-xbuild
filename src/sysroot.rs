@@ -85,11 +85,25 @@ fn build_crate(
     }
 
     util::write(&td.join("Cargo.toml"), &stoml)?;
-    fs::copy(lockfile, &td.join("Cargo.lock")).with_context(|| {
+    let td_lockfile = &td.join("Cargo.lock");
+    fs::copy(lockfile, td_lockfile).with_context(|| {
         format!(
             "failed to copy Cargo.lock from `{}` to `{}`",
             lockfile.display(),
-            &td.join("Cargo.lock").display()
+            td_lockfile.display()
+        )
+    })?;
+    let mut perms = fs::metadata(&td_lockfile).with_context(|| {
+        format!(
+            "failed to retrieve permissions for `{}`",
+            td_lockfile.display()
+        )
+    })?.permissions();
+    perms.set_readonly(false);
+    fs::set_permissions(&td_lockfile, perms).with_context(|| {
+        format!(
+            "failed to set writable permission for `{}`",
+            td_lockfile.display()
         )
     })?;
     util::mkdir(&td.join("src"))?;
