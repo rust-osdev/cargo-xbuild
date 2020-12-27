@@ -142,7 +142,9 @@ pub fn build(args: Args, command_name: &str, crate_config: Option<Config>) -> Re
         cmd.manifest_path(manifest_path);
     }
 
-    let metadata = cmd.exec().expect("cargo metadata invocation failed");
+    let metadata = cmd
+        .exec()
+        .map_err(|e| anyhow!("cargo metadata invocation failed: {}", e))?;
     let root = Path::new(&metadata.workspace_root);
 
     // Fall back to manifest if config not explicitly specified
