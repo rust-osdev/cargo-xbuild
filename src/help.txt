@@ -1,0 +1,22 @@
+Wrapper for `cargo {command_name}` that cross-compiles core, compiler_builtins and alloc
+
+USAGE:
+    cargo x{command_name} [OPTIONS]
+
+OPTIONS:
+    -h, --help      Prints help information and exit
+    ---version      Prints version information and exit
+
+    Any additional options are directly passed to `cargo {command_name}` (see
+    `cargo {command_name} --help` for possible options).
+
+CONFIGURATION:
+    Configuration is possible through a `package.metadata.cargo-xbuild` table
+    in your `Cargo.toml`:
+
+    [package.metadata.cargo-xbuild]
+    memcpy = true
+    sysroot_path = "target/sysroot"
+    panic_immediate_abort = false
+
+    See README.md for a description of these flags.

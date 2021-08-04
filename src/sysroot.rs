@@ -1,23 +1,22 @@
-use std::collections::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
+use std::env;
+use std::fs;
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::path::Path;
 use std::process::Command;
-use std::io::{self, Write};
-use std::{env, fs};
 
+use anyhow::{Context, Result};
 use rustc_version::VersionMeta;
-use tempdir::TempDir;
-use toml::{Table, Value};
+use tempfile::Builder;
+use toml::{value::Table, Value};
 
-use CompilationMode;
-use cargo::{Root, Rustflags};
-use errors::*;
-use extensions::CommandExt;
-use rustc::{Src, Sysroot, Target};
-use util;
-use xargo::Home;
-use {cargo, xargo};
+use crate::cargo::{self, Rustflags};
+use crate::config::Config;
+use crate::extensions::CommandExt;
+use crate::rustc::{Src, Sysroot, Target};
+use crate::util;
+use crate::xargo::Home;
+use crate::CompilationMode;
 
 #[cfg(feature = "dev")]
 fn profile() -> &'static str {
@@ -31,126 +30,194 @@ fn profile() -> &'static str {
 
 fn build(
     cmode: &CompilationMode,
-    blueprint: Blueprint,
     ctoml: &cargo::Toml,
     home: &Home,
-    rustflags: &Rustflags,
-    sysroot: &Sysroot,
+    config: &Config,
+    src: &Src,
     hash: u64,
     verbose: bool,
 ) -> Result<()> {
-    const TOML: &'static str = r#"
-[package]
-authors = ["The Rust Project Developers"]
-name = "sysroot"
-version = "0.0.0"
-"#;
-
     let rustlib = home.lock_rw(cmode.triple())?;
     rustlib
         .remove_siblings()
-        .chain_err(|| format!("couldn't clear {}", rustlib.path().display()))?;
+        .with_context(|| format!("couldn't clear {}", rustlib.path().display()))?;
     let dst = rustlib.parent().join("lib");
     util::mkdir(&dst)?;
 
-    if cmode.triple().contains("pc-windows-gnu") {
-        let src = &sysroot.path()
-            .join("lib")
-            .join("rustlib")
-            .join(cmode.triple())
-            .join("lib");
-
-        // These are required for linking executables/dlls
-        for file in ["rsbegin.o", "rsend.o", "crt2.o", "dllcrt2.o"].iter() {
-            let file_src = src.join(file);
-            let file_dst = dst.join(file);
-            fs::copy(&file_src, &file_dst)
-                .chain_err(|| format!("couldn't copy {} to {}", file_src.display(), file_dst.display()))?;
-        }
-    }
-
-    for (_, stage) in blueprint.stages {
-        let td = TempDir::new("xargo").chain_err(|| "couldn't create a temporary directory")?;
-        let td = td.path();
-
-        let mut stoml = TOML.to_owned();
-
-        let mut map = Table::new();
-        map.insert("dependencies".to_owned(), Value::Table(stage.toml));
-        stoml.push_str(&Value::Table(map).to_string());
-
-        if let Some(profile) = ctoml.profile() {
-            stoml.push_str(&profile.to_string())
-        }
-
-        util::write(&td.join("Cargo.toml"), &stoml)?;
-        util::mkdir(&td.join("src"))?;
-        util::write(&td.join("src/lib.rs"), "")?;
-
-        let cargo = || {
-            let mut cmd = Command::new("cargo");
-            let mut flags = rustflags.for_xargo(home);
-            flags.push_str(" -Z force-unstable-if-unmarked");
-            if verbose {
-                writeln!(io::stderr(), "+ RUSTFLAGS={:?}", flags).ok();
-            }
-            cmd.env("RUSTFLAGS", flags);
-            cmd.env_remove("CARGO_TARGET_DIR");
-
-            // As of rust-lang/cargo#4788 Cargo invokes rustc with a changed "current directory" so
-            // we can't assume that such directory will be the same as the directory from which
-            // Xargo was invoked. This is specially true when compiling the sysroot as the std
-            // source is provided as a workspace and Cargo will change the current directory to the
-            // root of the workspace when building one. To ensure rustc finds a target specification
-            // file stored in the current directory we'll set `RUST_TARGET_PATH`  to the current
-            // directory.
-            if env::var_os("RUST_TARGET_PATH").is_none() {
-                if let CompilationMode::Cross(ref target) = *cmode {
-                    if let Target::Custom { ref json, .. } = *target {
-                        cmd.env("RUST_TARGET_PATH", json.parent().unwrap());
-                    }
-                }
-            }
-
-            cmd.arg("build");
-
-            match () {
-                #[cfg(feature = "dev")]
-                () => {}
-                #[cfg(not(feature = "dev"))]
-                () => {
-                    cmd.arg("--release");
-                }
-            }
-            cmd.arg("--manifest-path");
-            cmd.arg(td.join("Cargo.toml"));
-            cmd.args(&["--target", cmode.triple()]);
-
-            if verbose {
-                cmd.arg("-v");
-            }
-
-            cmd
-        };
-
-        for krate in stage.crates {
-            cargo().arg("-p").arg(krate).run(verbose)?;
-        }
-
-        // Copy artifacts to Xargo sysroot
-        util::cp_r(
-            &td.join("target")
-                .join(cmode.triple())
-                .join(profile())
-                .join("deps"),
-            &dst,
-        )?;
-    }
+    build_liballoc(cmode, &ctoml, src, &dst, config, verbose)?;
 
     // Create hash file
     util::write(&rustlib.parent().join(".hash"), &hash.to_string())?;
 
     Ok(())
+}
+
+fn build_crate(
+    crate_name: &str,
+    lockfile: &Path,
+    mut stoml: String,
+    cmode: &CompilationMode,
+    ctoml: &cargo::Toml,
+    dst: &Path,
+    verbose: bool,
+) -> Result<()> {
+    let td = Builder::new()
+        .prefix("cargo-xbuild")
+        .tempdir()
+        .with_context(|| "couldn't create a temporary directory")?;
+    let td_path;
+    let td = if env::var_os("XBUILD_KEEP_TEMP").is_some() {
+        td_path = td.into_path();
+        println!("XBUILD_KEEP_TEMP: files at {:?}", td_path);
+        &td_path
+    } else {
+        td.path()
+    };
+
+    let target_dir = td.join("target");
+
+    if let Some(features) = ctoml.features() {
+        stoml.insert_str(0, &features.to_string())
+    }
+
+    if let Some(profile) = ctoml.profile() {
+        stoml.push_str(&profile.to_string())
+    }
+
+    util::write(&td.join("Cargo.toml"), &stoml)?;
+    let td_lockfile = &td.join("Cargo.lock");
+    fs::copy(lockfile, td_lockfile).with_context(|| {
+        format!(
+            "failed to copy Cargo.lock from `{}` to `{}`",
+            lockfile.display(),
+            td_lockfile.display()
+        )
+    })?;
+    let mut perms = fs::metadata(&td_lockfile).with_context(|| {
+        format!(
+            "failed to retrieve permissions for `{}`",
+            td_lockfile.display()
+        )
+    })?.permissions();
+    perms.set_readonly(false);
+    fs::set_permissions(&td_lockfile, perms).with_context(|| {
+        format!(
+            "failed to set writable permission for `{}`",
+            td_lockfile.display()
+        )
+    })?;
+    util::mkdir(&td.join("src"))?;
+    util::write(&td.join("src/lib.rs"), "")?;
+
+    let cargo = std::env::var("CARGO").unwrap_or("cargo".to_string());
+    let mut cmd = Command::new(cargo);
+    cmd.env("RUSTFLAGS", "-Cembed-bitcode=yes");
+    cmd.env("CARGO_TARGET_DIR", &target_dir);
+    cmd.env("__CARGO_DEFAULT_LIB_METADATA", "XARGO");
+
+    // As of rust-lang/cargo#4788 Cargo invokes rustc with a changed "current directory" so
+    // we can't assume that such directory will be the same as the directory from which
+    // Xargo was invoked. This is specially true when compiling the sysroot as the std
+    // source is provided as a workspace and Cargo will change the current directory to the
+    // root of the workspace when building one. To ensure rustc finds a target specification
+    // file stored in the current directory we'll set `RUST_TARGET_PATH`  to the current
+    // directory.
+    if env::var_os("RUST_TARGET_PATH").is_none() {
+        if let CompilationMode::Cross(ref target) = *cmode {
+            if let Target::Custom { ref json, .. } = *target {
+                cmd.env("RUST_TARGET_PATH", json.parent().unwrap());
+            }
+        }
+    }
+
+    cmd.arg("rustc");
+    cmd.arg("-p").arg(crate_name);
+
+    match () {
+        #[cfg(feature = "dev")]
+        () => {}
+        #[cfg(not(feature = "dev"))]
+        () => {
+            cmd.arg("--release");
+        }
+    }
+    cmd.arg("--manifest-path");
+    cmd.arg(td.join("Cargo.toml"));
+    cmd.args(&["--target", cmode.orig_triple()]);
+
+    if verbose {
+        cmd.arg("-v");
+    }
+
+    cmd.arg("--");
+    cmd.arg("-Z");
+    cmd.arg("force-unstable-if-unmarked");
+
+    cmd.run(verbose)?;
+
+    // Copy artifacts to Xargo sysroot
+    util::cp_r(
+        &target_dir.join(cmode.triple()).join(profile()).join("deps"),
+        dst,
+    )?;
+
+    Ok(())
+}
+
+fn build_liballoc(
+    cmode: &CompilationMode,
+    ctoml: &cargo::Toml,
+    src: &Src,
+    dst: &Path,
+    config: &Config,
+    verbose: bool,
+) -> Result<()> {
+    const TOML: &'static str = r#"
+[package]
+authors = ["The Rust Project Developers"]
+name = "alloc"
+version = "0.0.0"
+edition = "2018"
+
+[dependencies.compiler_builtins]
+version = "0.1.0"
+"#;
+
+    let mut stoml = TOML.to_owned();
+
+    if config.memcpy {
+        stoml.push_str("features = ['mem', 'core']\n");
+    } else {
+        stoml.push_str("features = ['core']\n");
+    }
+
+    stoml.push_str("[dependencies.core]\n");
+    stoml.push_str(&format!(
+        "path = '{}'\n",
+        src.path().join("core").display()
+    ));
+
+    if config.panic_immediate_abort {
+        stoml.push_str("features = ['panic_immediate_abort']\n");
+    }
+
+    stoml.push_str("[patch.crates-io.rustc-std-workspace-core]\n");
+    stoml.push_str(&format!(
+        "path = '{}'\n",
+        src.path().join("rustc-std-workspace-core").display()
+    ));
+
+    let path = src.path().join("alloc/src/lib.rs").display().to_string();
+    let mut map = Table::new();
+    let mut lib = Table::new();
+    lib.insert("name".to_owned(), Value::String("alloc".to_owned()));
+    lib.insert("path".to_owned(), Value::String(path));
+    map.insert("lib".to_owned(), Value::Table(lib));
+    stoml.push_str(&Value::Table(map).to_string());
+
+    let lockfile = src.path().join("..").join("Cargo.lock");
+
+    build_crate("alloc", &lockfile, stoml, cmode, ctoml, dst, verbose)
 }
 
 fn old_hash(cmode: &CompilationMode, home: &Home) -> Result<Option<u64>> {
@@ -169,21 +236,18 @@ fn old_hash(cmode: &CompilationMode, home: &Home) -> Result<Option<u64>> {
 ///
 /// This information is used to compute the hash
 ///
-/// - Dependencies in `Xargo.toml` for a specific target
 /// - RUSTFLAGS / build.rustflags / target.*.rustflags
 /// - The target specification file, is any
 /// - `[profile.release]` in `Cargo.toml`
 /// - `rustc` commit hash
 fn hash(
     cmode: &CompilationMode,
-    blueprint: &Blueprint,
     rustflags: &Rustflags,
     ctoml: &cargo::Toml,
     meta: &VersionMeta,
+    config: &Config,
 ) -> Result<u64> {
     let mut hasher = DefaultHasher::new();
-
-    blueprint.hash(&mut hasher);
 
     rustflags.hash(&mut hasher);
 
@@ -197,13 +261,16 @@ fn hash(
         hash.hash(&mut hasher);
     }
 
+    config.hash(&mut hasher);
+
     Ok(hasher.finish())
 }
 
 pub fn update(
     cmode: &CompilationMode,
     home: &Home,
-    root: &Root,
+    root: &Path,
+    config: &Config,
     rustflags: &Rustflags,
     meta: &VersionMeta,
     src: &Src,
@@ -211,14 +278,11 @@ pub fn update(
     verbose: bool,
 ) -> Result<()> {
     let ctoml = cargo::toml(root)?;
-    let xtoml = xargo::toml(root)?;
 
-    let blueprint = Blueprint::from(xtoml.as_ref(), cmode.triple(), root, &src)?;
-
-    let hash = hash(cmode, &blueprint, rustflags, &ctoml, meta)?;
+    let hash = hash(cmode, rustflags, &ctoml, meta, config)?;
 
     if old_hash(cmode, home)? != Some(hash) {
-        build(cmode, blueprint, &ctoml, home, rustflags, sysroot, hash, verbose)?;
+        build(cmode, &ctoml, home, config, src, hash, verbose)?;
     }
 
     // copy host artifacts into the sysroot, if necessary
@@ -237,160 +301,38 @@ pub fn update(
     }
 
     lock.remove_siblings()
-        .chain_err(|| format!("couldn't clear {}", lock.path().display()))?;
+        .with_context(|| format!("couldn't clear {}", lock.path().display()))?;
     let dst = lock.parent().join("lib");
     util::mkdir(&dst)?;
-    util::cp_r(
+    match util::cp_r(
         &sysroot
             .path()
-            .join("lib/rustlib")
+            .join("lib")
+            .join("rustlib")
             .join(&meta.host)
             .join("lib"),
         &dst,
-    )?;
+    ) {
+        Ok(()) => {}
+        Err(e) => eprintln!("Unable to copy the directory 'lib' from sysroot: {}", e),
+    };
+
+    let bin_dst = lock.parent().join("bin");
+    util::mkdir(&bin_dst)?;
+    match util::cp_r(
+        &sysroot
+            .path()
+            .join("lib")
+            .join("rustlib")
+            .join(&meta.host)
+            .join("bin"),
+        &bin_dst,
+    ) {
+        Ok(()) => {}
+        Err(e) => eprintln!("Unable to copy the directory 'bin' from sysroot: {}", e),
+    };
 
     util::write(&hfile, hash)?;
 
     Ok(())
-}
-
-/// Per stage dependencies
-#[derive(Debug)]
-pub struct Stage {
-    crates: Vec<String>,
-    toml: Table,
-}
-
-/// A sysroot that will be built in "stages"
-#[derive(Debug)]
-pub struct Blueprint {
-    stages: BTreeMap<i64, Stage>,
-}
-
-impl Blueprint {
-    fn new() -> Self {
-        Blueprint {
-            stages: BTreeMap::new(),
-        }
-    }
-
-    fn from(toml: Option<&xargo::Toml>, target: &str, root: &Root, src: &Src) -> Result<Self> {
-        let deps = match (
-            toml.and_then(|t| t.dependencies()),
-            toml.and_then(|t| t.target_dependencies(target)),
-        ) {
-            (Some(value), Some(tvalue)) => {
-                let mut deps = value
-                    .as_table()
-                    .cloned()
-                    .ok_or_else(|| format!("Xargo.toml: `dependencies` must be a table"))?;
-
-                let more_deps = tvalue.as_table().ok_or_else(|| {
-                    format!(
-                        "Xargo.toml: `target.{}.dependencies` must be \
-                         a table",
-                        target
-                    )
-                })?;
-                for (k, v) in more_deps {
-                    if deps.insert(k.to_owned(), v.clone()).is_some() {
-                        Err(format!(
-                            "found duplicate dependency name {}, \
-                             but all dependencies must have a \
-                             unique name",
-                            k
-                        ))?
-                    }
-                }
-
-                deps
-            }
-            (Some(value), None) | (None, Some(value)) => if let Some(table) = value.as_table() {
-                table.clone()
-            } else {
-                Err(format!(
-                    "Xargo.toml: target.{}.dependencies must be \
-                     a table",
-                    target
-                ))?
-            },
-            (None, None) => {
-                // If no dependencies were listed, we assume `core` as the
-                // only dependency
-                let mut t = BTreeMap::new();
-                t.insert("core".to_owned(), Value::Table(BTreeMap::new()));
-                t
-            }
-        };
-
-        let mut blueprint = Blueprint::new();
-        for (k, v) in deps {
-            if let Value::Table(mut map) = v {
-                let stage = if let Some(value) = map.remove("stage") {
-                    value
-                        .as_integer()
-                        .ok_or_else(|| format!("dependencies.{}.stage must be an integer", k))?
-                } else {
-                    0
-                };
-
-                if let Some(path) = map.get_mut("path") {
-                    let p = PathBuf::from(path.as_str()
-                        .ok_or_else(|| format!("dependencies.{}.path must be a string", k))?);
-
-                    if !p.is_absolute() {
-                        *path = Value::String(
-                            root.path()
-                                .join(&p)
-                                .canonicalize()
-                                .chain_err(|| format!("couldn't canonicalize {}", p.display()))?
-                                .display()
-                                .to_string(),
-                        );
-                    }
-                }
-
-                if !map.contains_key("path") && !map.contains_key("git") {
-                    let path = src.path().join(format!("lib{}", k)).display().to_string();
-
-                    map.insert("path".to_owned(), Value::String(path));
-                }
-
-                blueprint.push(stage, k, map);
-            } else {
-                Err(format!(
-                    "Xargo.toml: target.{}.dependencies.{} must be \
-                     a table",
-                    target,
-                    k
-                ))?
-            }
-        }
-
-        Ok(blueprint)
-    }
-
-    fn push(&mut self, stage: i64, krate: String, toml: Table) {
-        let stage = self.stages.entry(stage).or_insert_with(|| {
-            Stage {
-                crates: vec![],
-                toml: Table::new(),
-            }
-        });
-
-        stage.toml.insert(krate.clone(), Value::Table(toml));
-        stage.crates.push(krate);
-    }
-
-    fn hash<H>(&self, hasher: &mut H)
-    where
-        H: Hasher,
-    {
-        for stage in self.stages.values() {
-            for (k, v) in stage.toml.iter() {
-                k.hash(hasher);
-                v.to_string().hash(hasher);
-            }
-        }
-    }
 }

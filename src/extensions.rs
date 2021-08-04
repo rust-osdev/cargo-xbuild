@@ -1,8 +1,6 @@
-use std::io::Write;
-use std::io;
 use std::process::{Command, ExitStatus};
 
-use errors::*;
+use anyhow::{anyhow, Context, Result};
 
 pub trait CommandExt {
     fn run(&mut self, verbose: bool) -> Result<()>;
@@ -18,38 +16,39 @@ impl CommandExt for Command {
         if status.success() {
             Ok(())
         } else {
-            Err(format!(
+            Err(anyhow!(
                 "`{:?}` failed with exit code: {:?}",
                 self,
                 status.code()
-            ))?
+            ))
         }
     }
 
     /// Runs the command to completion
     fn run_and_get_status(&mut self, verbose: bool) -> Result<ExitStatus> {
         if verbose {
-            writeln!(io::stderr(), "+ {:?}", self).ok();
+            eprintln!("+ {:?}", self);
         }
 
         self.status()
-            .chain_err(|| format!("couldn't execute `{:?}`", self))
+            .with_context(|| format!("couldn't execute `{:?}`", self))
     }
 
     /// Runs the command to completion and returns its stdout
     fn run_and_get_stdout(&mut self, verbose: bool) -> Result<String> {
         if verbose {
-            writeln!(io::stderr(), "+ {:?}", self).ok();
+            eprintln!("+ {:?}", self);
         }
 
-        let out = self.output()
-            .chain_err(|| format!("couldn't execute `{:?}`", self))?;
+        let out = self
+            .output()
+            .with_context(|| format!("couldn't execute `{:?}`", self))?;
 
         if out.status.success() {
             Ok(String::from_utf8(out.stdout)
-                .chain_err(|| format!("`{:?}` output was not UTF-8", self))?)
+                .with_context(|| format!("`{:?}` output was not UTF-8", self))?)
         } else {
-            Err(format!(
+            Err(anyhow!(
                 "`{:?}` failed with exit code: {:?}",
                 self,
                 out.status.code()
