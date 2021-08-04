@@ -1,16 +1,15 @@
-use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::{env, fmt};
 
+use anyhow::{anyhow, Context, Result};
 use toml::Value;
 
-use cli::Args;
-use errors::*;
-use extensions::CommandExt;
-use util;
-use xargo::Home;
+use crate::cli::Args;
+use crate::extensions::CommandExt;
+use crate::util;
+use crate::xargo::Home;
 
 pub struct Rustflags {
     flags: Vec<String>,
@@ -42,11 +41,24 @@ impl Rustflags {
     }
 
     /// Stringifies these flags for Xargo consumption
-    pub fn for_xargo(&self, home: &Home) -> String {
+    pub fn for_xargo(&self, home: &Home) -> Result<String> {
+        let sysroot = format!("{}", home.display());
+        if env::var_os("XBUILD_ALLOW_SYSROOT_SPACES").is_none() && sysroot.contains(" ") {
+            return Err(anyhow!(
+                "Sysroot must not contain spaces!\n\
+                See issue https://github.com/rust-lang/cargo/issues/6139\n\n\
+                The sysroot is `{}`.\n\n\
+                To override this error, you can set the `XBUILD_ALLOW_SYSROOT_SPACES`\
+                environment variable.",
+                sysroot
+            ));
+        }
         let mut flags = self.flags.clone();
-        flags.push("--sysroot".to_owned());
-        flags.push(home.display().to_string());
-        flags.join(" ")
+        if !flags.contains(&String::from("--sysroot")) {
+            flags.push("--sysroot".to_owned());
+            flags.push(sysroot);
+        }
+        Ok(flags.join(" "))
     }
 }
 
@@ -60,50 +72,34 @@ pub fn rustflags(config: Option<&Config>, target: &str) -> Result<Rustflags> {
     flags(config, target, "rustflags").map(|fs| Rustflags { flags: fs })
 }
 
-pub struct Rustdocflags {
-    flags: Vec<String>,
-}
-
-impl Rustdocflags {
-    /// Stringifies these flags for Xargo consumption
-    pub fn for_xargo(mut self, home: &Home) -> String {
-        self.flags.push("--sysroot".to_owned());
-        self.flags.push(home.display().to_string());
-        self.flags.join(" ")
-    }
-}
-
-pub fn rustdocflags(config: Option<&Config>, target: &str) -> Result<Rustdocflags> {
-    flags(config, target, "rustdocflags").map(|fs| Rustdocflags { flags: fs })
-}
-
-
 /// Returns the flags for `tool` (e.g. rustflags)
 ///
 /// This looks into the environment and into `.cargo/config`
 fn flags(config: Option<&Config>, target: &str, tool: &str) -> Result<Vec<String>> {
     if let Some(t) = env::var_os(tool.to_uppercase()) {
-        return Ok(
-            t.to_string_lossy()
-                .split_whitespace()
-                .map(|w| w.to_owned())
-                .collect(),
-        );
+        return Ok(t
+            .to_string_lossy()
+            .split_whitespace()
+            .map(|w| w.to_owned())
+            .collect());
     }
 
     if let Some(config) = config.as_ref() {
         let mut build = false;
         if let Some(array) = config
             .table
-            .lookup(&format!("target.{}.{}", target, tool))
+            .get("target")
+            .and_then(|v| v.get(target))
+            .and_then(|v| v.get(tool))
             .or_else(|| {
                 build = true;
-                config.table.lookup(&format!("build.{}", tool))
-            }) {
+                config.table.get("build").and_then(|v| v.get(tool))
+            })
+        {
             let mut flags = vec![];
 
             let mut error = false;
-            if let Some(array) = array.as_slice() {
+            if let Value::Array(array) = array {
                 for value in array {
                     if let Some(flag) = value.as_str() {
                         flags.push(flag.to_owned());
@@ -118,17 +114,16 @@ fn flags(config: Option<&Config>, target: &str, tool: &str) -> Result<Vec<String
 
             if error {
                 if build {
-                    Err(format!(
+                    Err(anyhow!(
                         ".cargo/config: build.{} must be an array \
                          of strings",
                         tool
                     ))?
                 } else {
-                    Err(format!(
+                    Err(anyhow!(
                         ".cargo/config: target.{}.{} must be an \
                          array of strings",
-                        target,
-                        tool
+                        target, tool
                     ))?
                 }
             } else {
@@ -143,20 +138,42 @@ fn flags(config: Option<&Config>, target: &str, tool: &str) -> Result<Vec<String
 }
 
 pub fn run(args: &Args, verbose: bool) -> Result<ExitStatus> {
-    Command::new("cargo")
+    let cargo = std::env::var("CARGO").unwrap_or("cargo".to_string());
+    Command::new(cargo)
+        .arg("build")
         .args(args.all())
         .run_and_get_status(verbose)
 }
 
+#[derive(Debug)]
 pub struct Config {
+    parent_path: PathBuf,
     table: Value,
 }
 
 impl Config {
-    pub fn target(&self) -> Result<Option<&str>> {
-        if let Some(v) = self.table.lookup("build.target") {
-            Ok(Some(v.as_str()
-                .ok_or_else(|| format!(".cargo/config: build.target must be a string"))?))
+    pub fn target(&self) -> Result<Option<String>> {
+        if let Some(v) = self.table.get("build").and_then(|v| v.get("target")) {
+            let target = v
+                .as_str()
+                .ok_or_else(|| anyhow!(".cargo/config: build.target must be a string"))?;
+            if target.ends_with(".json") {
+                let target_path = self.parent_path.join(target);
+                let canonicalized = target_path.canonicalize().map_err(|err| {
+                    anyhow!(
+                        "target JSON file {} does not exist: {}",
+                        target_path.display(),
+                        err
+                    )
+                })?;
+                let as_string = canonicalized
+                    .into_os_string()
+                    .into_string()
+                    .map_err(|err| anyhow!("target path not valid utf8: {:?}", err))?;
+                Ok(Some(as_string))
+            } else {
+                Ok(Some(target.to_owned()))
+            }
         } else {
             Ok(None)
         }
@@ -164,10 +181,11 @@ impl Config {
 }
 
 pub fn config() -> Result<Option<Config>> {
-    let cd = env::current_dir().chain_err(|| "couldn't get the current directory")?;
+    let cd = env::current_dir().with_context(|| "couldn't get the current directory")?;
 
     if let Some(p) = util::search(&cd, ".cargo/config") {
         Ok(Some(Config {
+            parent_path: p.to_owned(),
             table: util::parse(&p.join(".cargo/config"))?,
         }))
     } else {
@@ -203,12 +221,25 @@ impl<'t> Profile<'t> {
 
 impl<'t> fmt::Display for Profile<'t> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut map = BTreeMap::new();
+        let mut map = toml::map::Map::new();
         map.insert("profile".to_owned(), {
-            let mut map = BTreeMap::new();
+            let mut map = toml::map::Map::new();
             map.insert("release".to_owned(), self.table.clone());
             Value::Table(map)
         });
+
+        fmt::Display::fmt(&Value::Table(map), f)
+    }
+}
+
+pub struct Features<'a> {
+    array: &'a Value,
+}
+
+impl<'a> fmt::Display for Features<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut map = toml::map::Map::new();
+        map.insert("cargo-features".to_owned(), self.array.clone());
 
         fmt::Display::fmt(&Value::Table(map), f)
     }
@@ -222,63 +253,18 @@ impl Toml {
     /// `profile.release` part of `Cargo.toml`
     pub fn profile(&self) -> Option<Profile> {
         self.table
-            .lookup("profile.release")
+            .get("profile")
+            .and_then(|v| v.get("release"))
             .map(|t| Profile { table: t })
     }
-}
 
-pub fn toml(root: &Root) -> Result<Toml> {
-    util::parse(&root.path().join("Cargo.toml")).map(|t| Toml { table: t })
-}
-
-pub struct Root {
-    path: PathBuf,
-}
-
-impl Root {
-    pub fn path(&self) -> &Path {
-        &self.path
+    pub fn features(&self) -> Option<Features> {
+        self.table
+            .get("cargo-features")
+            .map(|a| Features { array: a })
     }
 }
 
-pub fn root() -> Result<Option<Root>> {
-    let cd = env::current_dir().chain_err(|| "couldn't get the current directory")?;
-
-    Ok(util::search(&cd, "Cargo.toml").map(|p| Root { path: p.to_owned() }))
-}
-
-#[derive(Clone, Copy, PartialEq)]
-pub enum Subcommand {
-    Clean,
-    Doc,
-    Init,
-    New,
-    Other,
-    Search,
-    Update,
-}
-
-impl Subcommand {
-    pub fn needs_sysroot(&self) -> bool {
-        use self::Subcommand::*;
-
-        match *self {
-            Clean | Init | New | Search | Update => false,
-            _ => true,
-        }
-    }
-}
-
-impl<'a> From<&'a str> for Subcommand {
-    fn from(s: &str) -> Subcommand {
-        match s {
-            "clean" => Subcommand::Clean,
-            "doc" => Subcommand::Doc,
-            "init" => Subcommand::Init,
-            "new" => Subcommand::New,
-            "search" => Subcommand::Search,
-            "update" => Subcommand::Update,
-            _ => Subcommand::Other,
-        }
-    }
+pub fn toml(root: &Path) -> Result<Toml> {
+    util::parse(&root.join("Cargo.toml")).map(|t| Toml { table: t })
 }

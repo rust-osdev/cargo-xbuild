@@ -1,25 +1,37 @@
-[![crates.io](https://img.shields.io/crates/v/xargo.svg)](https://crates.io/crates/xargo)
-[![crates.io](https://img.shields.io/crates/d/xargo.svg)](https://crates.io/crates/xargo)
+# cargo-xbuild
 
-# `xargo`
+Cargo-xbuild is a wrapper for `cargo build`, which cross compiles the sysroot crates `core`, `compiler_builtins`, and `alloc` for custom targets. It is a simplified fork of [`xargo`](https://github.com/japaric/xargo), which is in maintainance mode.
 
-> The sysroot manager that lets you build and customize `std`
+## Alternative: The `build-std` feature of cargo
 
-<p align="center">
-<img
-  alt="Cross compiling `std` for i686-unknown-linux-gnu"
-  src="assets/xargo.png"
-  title="Cross compiling `std` for i686-unknown-linux-gnu"
->
-<br>
-<em>Cross compiling `std` for i686-unknown-linux-gnu</em>
-</p>
+Cargo now has its own feature for cross compiling the sysroot: [**`build-std`**](https://doc.rust-lang.org/nightly/cargo/reference/unstable.html#build-std). You can use it by passing `-Z build-std=core,alloc` to `cargo build`. Alternatively, you can specify the following in a `.cargo/config.toml` file:
 
-Xargo builds and manages "sysroots" (cf. `rustc --print sysroot`). Making it
-easy to cross compile Rust crates for targets that *don't* have binary
-releases of the standard crates, like the `thumbv*m-none-eabi*` targets. And
-it also lets you build a customized `std` crate, e.g. compiled with `-C
-panic=abort`, for your target.
+```toml
+[unstable]
+build-std = ["core", "compiler_builtins", "alloc"]
+```
+
+The above requires at least Rust nightly 2020–07–15. With the above config in place, the normal `cargo build` command will now automatically cross-compile the specified sysroot crates.
+
+The compiler may emit references to `memset`, `memcpy`, etc which are usually provided by the platform's libc but luckily `compiler_builtins` has a `mem` feature that will provide implementations of those functions. To enable that feature we can use the unstable cargo flag `-Z build-std-features=compiler-builtins-mem` or specify the following in a `config.toml`:
+
+```diff
+[unstable]
+build-std = ["core", "compiler_builtins", "alloc"]
++build-std-features = ["compiler-builtins-mem"]
+```
+
+Note that using the `compiler-builtins-mem` requires at least Rust nightly 2020-09-30. For older versions you need to add a dependency on the [`rlibc`](https://docs.rs/rlibc/1.0.0/rlibc/) crate to provide implementations of `memset`, `memcpy`, etc, which the compiler expects. Note that you need to add an `extern crate rlibc` statement in order for this to work (even in the 2018 edition of Rust). This is required to get cargo to link the otherwise unused crate.
+
+Compared to `cargo-xbuild`, there are many advantages of using `cargo`'s own feature:
+
+- the normal `cargo {check, build, run, test}` commands can be used
+- no external tool must be installed
+- less bugs and breakage because it is always up to date with rustc/cargo
+- faster compilation since the compiler can build the sysroot concurrently to the project crates
+- it might be stablized one day
+
+So it is strongly recommended to try the `build-std` feature of cargo instead of using this crate.
 
 ## Dependencies
 
@@ -28,324 +40,103 @@ panic=abort`, for your target.
 
 - Rust and Cargo.
 
-## Installation
+## Installation of `cargo-xbuild`
+
+In case you decide to use `cargo-xbuild` instead of cargo's `build-std` feature for some reason, you can install this crate through:
 
 ```
-$ cargo install xargo
+$ cargo install cargo-xbuild
 ```
 
-But we also have [binary releases] for the three major OSes.
-
-[binary releases]: https://github.com/japaric/xargo/releases
+Note: The latest version of `cargo-xbuild` supports all nightlies after 2020-07-30. If you are on an older nightly, you need to install version 0.5.35: `cargo install cargo-xbuild --version 0.5.35`.
 
 ## Usage
 
-### `no_std`
-
-`xargo` has the exact same CLI as `cargo`.
+Just use `cargo xbuild` instead of `cargo build` when cross-compiling for a custom target.
 
 ```
-# This Just Works
-$ xargo build --target thumbv6m-none-eabi
-   Compiling core v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/libcore)
-    Finished release [optimized] target(s) in 11.61 secs
-   Compiling lib v0.1.0 (file://$PWD)
-    Finished debug [unoptimized + debuginfo] target(s) in 0.5 secs
+cargo xbuild --target your-target-name.json
 ```
 
-`xargo` will cache the sysroot, in this case the `core` crate, so the next
-`build` command will be (very) fast.
+Instead of the "can't find crate for `core`" error you would get with a plain `cargo build`, this crate cross-compiles the `core`, `compiler_builtins`, and `alloc` crates and then invokes `cargo build` with a modified sysroot. The sysroot is compiled in the `target` directory of your crate.
 
-```
-$ xargo build --target thumbv6m-none-eabi
-    Finished debug [unoptimized + debuginfo] target(s) in 0.0 secs
-```
+All additional arguments (e.g. `--release` or `--verbose`) are forwarded to `cargo build`.
 
-By default, `xargo` will only compile the `core` crate for the target. If you
-need a bigger subset of the standard crates, specify the dependencies in a
-`Xargo.toml` at the root of your Cargo project (right next to `Cargo.toml`).
+## Configuration
 
-```
-$ cat Xargo.toml
-# Alternatively you can use [build.dependencies]
-# the syntax is the same as Cargo.toml's; you don't need to specify path or git
-[target.thumbv6m-none-eabi.dependencies]
-collections = {}
+To configure `cargo-xbuild` create a `package.metadata.cargo-xbuild` table in your `Cargo.toml`. The following options are available:
 
-$ xargo build --target thumbv6m-none-eabi
-   Compiling core v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/libcore)
-   Compiling alloc v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/liballoc)
-   Compiling std_unicode v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/libstd_unicode)
-   Compiling collections v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/libcollections)
-    Finished release [optimized] target(s) in 15.26 secs
-   Compiling lib v0.1.0 (file://$PWD)
-    Finished debug [unoptimized + debuginfo] target(s) in 0.5 secs
+```toml
+[package.metadata.cargo-xbuild]
+memcpy = true
+sysroot_path = "target/sysroot"
+panic_immediate_abort = false
 ```
 
-### `std`
+- The `memcpy` flag defines whether the `mem` feature of the `compiler_builtins` crate should be activated. Turning this flag off allows to specify own versions of the `memcpy`, `memset` etc. functions.
+- The `sysroot_path` flag specifies the directory where the sysroot should be placed.
+- The `panic_immediate_abort` flag specifies whether the `panic_immediate_abort` feature the of `core` crate should be defined.
 
-You can compile a customized `std` crate as well, just specify which Cargo
-features to enable.
+### Environment Variables
 
-```
-# Build `std` with `-C panic=abort` (default) and with jemalloc as the default
-# allocator
-$ cat Xargo.toml
-[target.i686-unknown-linux-gnu.dependencies.std]
-features = ["jemalloc"]
+In addition to the above configuration keys, `cargo-xbuild` can be also configured through the following environment variables:
 
-# Needed to compile `std` with `-C panic=abort`
-$ tail -n2 Cargo.toml
-[profile.release]
-panic = "abort"
+- The `XBUILD_SYSROOT_PATH` variable can be used to specify where `cargo-xbuild` should place the generated sysroot. This variables takes precendence over the `package.metadata.cargo-xbuild.sysroot_path` configuration key.
+- When the `XBUILD_KEEP_TEMP` variable is set, the temporary directory used for compiling the sysroot is not deleted. This is useful for debugging. For convenience, `cargo-xbuild` also prints the directory name when the environment variable is set.
 
-$ xargo run --target i686-unknown-linux-gnu --release
-    Updating registry `https://github.com/rust-lang/crates.io-index`
-   Compiling libc v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/rustc/libc_shim)
-   Compiling core v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/libcore)
-   Compiling build_helper v0.1.0 (file://$SYSROOT/lib/rustlib/src/rust/src/build_helper)
-   Compiling gcc v0.3.41
-   Compiling unwind v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/libunwind)
-   Compiling std v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/libstd)
-   Compiling compiler_builtins v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/libcompiler_builtins)
-   Compiling alloc_jemalloc v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/liballoc_jemalloc)
-   Compiling alloc v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/liballoc)
-   Compiling rand v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/librand)
-   Compiling std_unicode v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/libstd_unicode)
-   Compiling alloc_system v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/liballoc_system)
-   Compiling panic_abort v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/libpanic_abort)
-   Compiling collections v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/libcollections)
-    Finished release [optimized] target(s) in 33.49 secs
-   Compiling hello v0.1.0 (file://$PWD)
-    Finished release [optimized] target(s) in 0.28 secs
-     Running `target/i686-unknown-linux-gnu/release/hello`
-Hello, world!
-```
+## Dev channel
 
-If you'd like to know what `xargo` is doing under the hood, pass the verbose,
-`-v`, flag to it.
+If you want to use a local Rust source instead of `rust-src` rustup component, you can set the `XARGO_RUST_SRC` environment variable.
 
 ```
-$ xargo build --target thumbv6m-none-eabi -v
-+ "rustc" "--print" "target-list"
-+ "rustc" "--print" "sysroot"
-+ "cargo" "build" "--release" "--manifest-path" "/tmp/xargo.lTBXKnaUGicV/Cargo.toml" "--target" "thumbv6m-none-eabi" "-v" "-p" "core"
-   Compiling core v0.0.0 (file://$SYSROOT/lib/rustlib/src/rust/src/libcore)
-     Running `rustc --crate-name core $SYSROOT/lib/rustlib/src/rust/src/libcore/lib.rs --crate-type lib -C opt-level=3 -C metadata=a5c596f87f7d486b -C extra-filename=-a5c596f87f7d486b --out-dir /tmp/xargo.lTBXKnaUGicV/target/thumbv6m-none-eabi/release/deps --emit=dep-info,link --target thumbv6m-none-eabi -L dependency=/tmp/xargo.lTBXKnaUGicV/target/thumbv6m-none-eabi/release/deps -L dependency=/tmp/xargo.lTBXKnaUGicV/target/release/deps`
-    Finished release [optimized] target(s) in 11.50 secs
-+ "cargo" "build" "--target" "thumbv6m-none-eabi" "-v"
-   Compiling lib v0.1.0 (file://$PWD)
-     Running `rustc --crate-name lib src/lib.rs --crate-type lib -g -C metadata=461fd0b398821543 -C extra-filename=-461fd0b398821543 --out-dir $PWD/target/thumbv6m-none-eabi/debug/deps --emit=dep-info,link --target thumbv6m-none-eabi -L dependency=$PWD/target/thumbv6m-none-eabi/debug/deps -L dependency=$PWD/lib/target/debug/deps --sysroot $HOME/.xargo`
-    Finished debug [unoptimized + debuginfo] target(s) in 0.5 secs
-```
-
-### Dev channel
-
-Oh, and if you want to use `xargo` to compile `std` using a "dev" `rustc`, a
-rust compiled from source, you can use the `XARGO_RUST_SRC` environment variable
-to tell `xargo` where the Rust source is.
-
-```
-# The source of the `core` crate must be in `$XARGO_RUST_SRC/libcore`
+# The source of the `core` crate must be in `$XARGO_RUST_SRC/core`
 $ export XARGO_RUST_SRC=/path/to/rust/src
 
-$ xargo build --target msp430-none-elf
+$ cargo xbuild --target msp430-none-elf.json
 ```
 
-**NOTE** This also works with the nightly channel but it's not recommended as
-the Rust source may diverge from what your compiler is able to compile as it may
-make use of newer features that your compiler doesn't understand.
+## Using on Android
 
-### Compiling the sysroot with custom rustc flags
+It's possible to run cargo-xbuild on your Android phone:
 
-Xargo uses the same custom rustc flags that apply to the target Cargo project.
-So you can use either the `RUSTFLAGS` env variable or a `.cargo/config`
-configuration file to specify custom rustc flags.
+### Install Termux and Nightly Rustc
+
+- Install [termux](https://play.google.com/store/apps/details?id=com.termux)
+- Install fish shell and set as default (optional): `pkg install fish; chsh -s fish; fish`
+- Install some basic tools: `pkg install wget tar`
+- Add the [community repository by its-pointless](https://wiki.termux.com/wiki/Package_Management#By_its-pointless_.28live_the_dream.29:): `wget https://its-pointless.github.io/setup-pointless-repo.sh; bash setup-pointless-repo.sh`
+- Install rust nightly: `pkg install rustc cargo rustc-nightly`
+- Prepend the nightly rustc path to your `$PATH` in order to use nightly (fish syntax): `set -U fish_user_paths $PREFIX/opt/rust-nightly/bin/ $fish_user_paths`
+- `rustc --version` should now return a nightly version
+
+### (Optional) Install Git and Clone your Repository
+
+- Install git: `pkg install git`
+- Clone a repository of your choice: `git clone https://github.com/phil-opp/blog_os.git`
+
+### Install Xbuild
+
+- Install cargo-xbuild: `cargo install cargo-xbuild`
+- Add the cargo bin directory to your `$PATH` (fish syntax): `set -U fish_user_paths ~/.cargo/bin/ $fish_user_paths`
+- Now `cargo xbuild` should be available.
+
+It does not work yet because it needs access to the rust source code. By default it tries to use rustup for this, but we have no rustup support so we need a different way.
+
+### Providing the Rust Source Code
+
+The Rust source code corresponding to our installed nightly is available in the `its-pointless` repository:
+
+- Download it: `wget https://github.com/its-pointless/its-pointless.github.io/raw/master/rust-src-nightly.tar.xz`
+- Extract it: `tar xf rust-src-nightly.tar.xz`
+- Set the `XARGO_RUST_SRC` environment variable to tell cargo-xbuild the source path (fish syntax): `set -Ux XARGO_RUST_SRC ~/rust-src-nightly/rust-src/lib/rustlib/src/rust/src`
+
+Now cargo-xbuild should no longer complain about a missing `rust-src` component. However it will throw an I/O error after building the sysroot. The problem is that the downloaded Rust source code has a different structure than the source provided by rustup. We can fix this by adding a symbolic link:
 
 ```
-# build the sysroot with debug information
-$ RUSTFLAGS='-g' xargo build --target x86_64-unknown-linux-gnu
-
-# Alternatively
-$ edit .cargo/config && cat $_
-[build]
-rustflags = ["-g"]
-
-# Then you can omit RUSTFLAGS
-$ xargo build --target x86_64-unknown-linux-gnu
+ln -s ~/../usr/opt/rust-nightly/bin ~/../usr/opt/rust-nightly/lib/rustlib/aarch64-linux-android/bin
 ```
 
-### Compiling the sysroot for a custom target
-
-At some point you may want to develop a program for a target that's not
-officially supported by rustc. Xargo's got your back! It supports custom targets
-via target specifications files, which are not really documented anywhere other
-than in the [compiler source code][spec-docs]. Luckily you don't need to write
-a specification file from scratch; you can start from an existing one.
-
-[spec-docs]: https://github.com/rust-lang/rust/blob/256e497fe63bf4b13f7c0b58fa17360ca849c54d/src/librustc_back/target/mod.rs#L228-L409
-
-For example, let's say that you want to cross compile a program for a PowerPC
-Linux systems that uses uclibc instead of glibc. There's a similarly looking
-target in the list of targets supported by the compiler -- see `rustc --print
-target-list` -- and that is `powerpc-unknown-linux-gnu`. So you can start by
-dumping the specification of that target into a file:
-
-``` console
-$ rustc -Z unstable-options --print target-spec-json --target powerpc-unknown-linux-gnu | tee powerpc-unknown-linux-uclibc.json
-```
-
-``` js
-{
-  "arch": "powerpc",
-  "data-layout": "E-m:e-p:32:32-i64:64-n32",
-  "dynamic-linking": true,
-  "env": "gnu",
-  "executables": true,
-  "has-elf-tls": true,
-  "has-rpath": true,
-  "is-builtin": true,
-  "linker-flavor": "gcc",
-  "linker-is-gnu": true,
-  "llvm-target": "powerpc-unknown-linux-gnu",
-  "max-atomic-width": 32,
-  "os": "linux",
-  "position-independent-executables": true,
-  "pre-link-args": {
-    "gcc": [
-      "-Wl,--as-needed",
-      "-Wl,-z,noexecstack",
-      "-m32"
-    ]
-  },
-  "target-endian": "big",
-  "target-family": "unix",
-  "target-pointer-width": "32",
-  "vendor": "unknown"
-}
-```
-
-One of the things you'll definitively want to do is drop the `is-builtin` field
-as that's reserved for targets that are defined in the compiler itself. Apart
-from that the only modification you would have to in this case is change the
-`env` field from `gnu` (glibc) to `uclibc`.
-
-``` diff
-   "arch": "powerpc",
-   "data-layout": "E-m:e-p:32:32-i64:64-n32",
-   "dynamic-linking": true,
--  "env": "gnu",
-+  "env": "uclibc",
-   "executables": true,
-   "has-elf-tls": true,
-   "has-rpath": true,
--  "is-builtin": true,
-   "linker-flavor": "gcc",
-   "linker-is-gnu": true,
-   "llvm-target": "powerpc-unknown-linux-gnu",
-```
-
-Once you have your target specification file you only have to call Xargo with
-the right target triple; make sure that the specification file is the same
-folder from where you invoke Xargo because that's where rustc expects it to be.
-
-``` console
-$ ls powerpc-unknown-linux-uclibc.json
-powerpc-unknown-linux-uclibc.json
-
-$ xargo build --target powerpc-unknown-linux-uclibc
-```
-
-Your build may fail because if rustc doesn't support your target then it's
-likely that the standard library doesn't support it either. In that case you
-will have to modify the source of the standard library. Xargo helps with that
-too because you can make a copy of the original source -- see `rustc --print
-sysroot`, modify it and then point Xargo to it using the `XARGO_RUST_SRC` env
-variable.
-
-### Multi-stage builds
-
-Some standard crates have implicit dependencies between them. For example, the
-`test` crate implicitly depends on the `std`. Implicit here means that the test
-crate Cargo.toml [doesn't list std as its dependency][test]. To compile a
-sysroot that contains such crates you can perform the build in stages by
-specifying which crates belong to each stage in the Xargo.toml file:
-
-[test]: https://github.com/rust-lang/rust/blob/1.17.0/src/libtest/Cargo.toml
-
-``` toml
-[dependencies.std]
-stage = 0
-
-[dependencies.test]
-stage = 1
-```
-
-This will compile an intermediate sysroot, the stage 0 sysroot, containing the
-`std` crate, and then it will compile the `test` crate against that intermediate
-sysroot. The final sysroot, the stage 1 sysroot, will contain both the `std` and
-`test` crates, and their dependencies.
-
-### Creating a sysroot with custom crates
-
-Xargo lets you create a sysroot with custom crates. You can virtually put any
-crate in the sysroot. However, this feature is mainly used to create [alternative
-`std` facades][steed], and to replace the `test` crate with [one that supports
-`no_std` targets][utest]. To specify the contents of the sysroot simply list the
-dependencies in the Xargo.toml file as you would do with Cargo.toml:
-
-[steed]: https://github.com/japaric/steed
-[utest]: https://github.com/japaric/utest
-
-``` toml
-[dependencies]
-collections = {}
-rand = {}
-
-[dependencies.compiler_builtins]
-features = ["mem"]
-stage = 1
-
-[dependencies.std]
-git = "https://github.com/japaric/steed"
-stage = 2
-```
-
-## Caveats / gotchas
-
-- Xargo won't build a sysroot when used with stable or beta Rust. This is
-  because `std` and other standard crates depend on unstable features so it's
-  not possible to build the sysroot with stable or beta.
-
-- `std` is built as rlib *and* dylib. The dylib needs a panic library and an
-  allocator.  If you do not specify the `panic-unwind` feature, you have to set
-  `panic = "abort"` in `Cargo.toml`.
-
-- To build without the `jemalloc` feature include the following in `Xargo.toml`:
-
-  ``` toml
-  [dependencies.std]
-  features = ["force_alloc_system"]
-  ```
-
-  What this flag means is that every program compiled with this libstd can only use the system
-  allocator. If your program tries to set its own allocator, compilation will fail because now two
-  allocators are set (one by libstd, one by your program). For some further information on this
-  issue, see
-  [rust-lang/rust#43637](https://github.com/rust-lang/rust/issues/43637#issuecomment-320463578).
-
-- It's recommended that the `--target` option is always used for `xargo`. This is because it must
-  be provided even when compiling for the host platform due to the way cargo handles compiler
-  plugins (e.g. `serde_derive`) and build scripts (`build.rs`). This also applies to how all of the
-  dependant crates get compiled that use compiler plugins or build scripts. You can determine your
-  host's target triple with `rustc -vV`. On *nix, the following rune will extract the triple:
-  `rustc -vV | egrep '^host: ' | sed 's/^host: //'`.
-
-- Remember that both `core` and `std` will get implicitly linked to your crate but *all the other
-  sysroot crates* will *not*. This means that if your Xargo.toml contains a crate like
-  `compiler_builtins` or `alloc` then you will have to add a `extern crate compiler_builtins` or
-  `extern crate alloc` *somewhere* in your dependency graph (either in your current crate or in some
-  of its dependencies).
+Now `cargo xbuild --target your-target.json` should work!
 
 ## License
 
