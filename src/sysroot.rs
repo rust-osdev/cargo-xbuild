@@ -214,7 +214,7 @@ version = "0.1.0"
     map.insert("lib".to_owned(), Value::Table(lib));
     stoml.push_str(&Value::Table(map).to_string());
 
-    let lockfile = src.path().join("..").join("Cargo.lock");
+    let lockfile = src.path().join("Cargo.lock");
 
     build_crate("alloc", &lockfile, stoml, cmode, ctoml, dst, verbose)
 }
